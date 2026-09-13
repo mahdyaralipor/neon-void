@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Vazirmatn", system-ui, sans-serif;
+  --font-display: "Orbitron", "Vazirmatn", sans-serif;
+  --color-void: #050514;
+  --color-panel: #0b0b20;
+  --color-neon: #00f0ff;
+  --color-pink: #ff2d78;
+  --color-lime: #a3ff12;
+  --color-gold: #ffd319;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: #050514;
+  color: #e8ecff;
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* neon text */
+.neon-text {
+  text-shadow: 0 0 12px rgba(0, 240, 255, 0.8), 0 0 42px rgba(0, 240, 255, 0.4);
+}
+.neon-pink {
+  text-shadow: 0 0 12px rgba(255, 45, 120, 0.8), 0 0 42px rgba(255, 45, 120, 0.4);
+}
+
+/* glass panel */
+.glass {
+  background: linear-gradient(160deg, rgba(17, 20, 46, 0.92), rgba(8, 8, 24, 0.94));
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(0, 240, 255, 0.16);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.03) inset, 0 24px 80px rgba(0,0,0,0.55), 0 0 60px rgba(0,240,255,0.06);
+}
+
+.btn-neon {
+  position: relative;
+  transition: transform .15s ease, box-shadow .2s ease, filter .2s ease;
+}
+.btn-neon:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.12);
+}
+.btn-neon:active {
+  transform: translateY(1px) scale(.99);
+}
+
+/* animations */
+@keyframes float-y {
+  0%, 100% { transform: translateY(-6px); }
+  50% { transform: translateY(6px); }
+}
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .55; }
+}
+@keyframes grid-pan {
+  from { background-position: 0 0; }
+  to { background-position: 80px 80px; }
+}
+@keyframes combo-pop {
+  0% { transform: scale(1.5); }
+  100% { transform: scale(1); }
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(18px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.anim-rise { animation: rise-in .5s cubic-bezier(.2,.9,.25,1.2) both; }
+.anim-float { animation: float-y 5s ease-in-out infinite; }
+
+/* v2 cinematic menu */
+@keyframes announce-in {
+  0% { opacity: 0; transform: translateY(-12px) scale(.9); }
+  12% { opacity: 1; transform: translateY(0) scale(1.04); }
+  20% { transform: translateY(0) scale(1); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.anim-announce { animation: announce-in .35s ease-out both; }
+
+@keyframes title-glow {
+  0%, 100% { text-shadow: 0 0 12px rgba(0,240,255,.8), 0 0 42px rgba(0,240,255,.4); }
+  50% { text-shadow: 0 0 22px rgba(0,240,255,1), 0 0 70px rgba(255,45,120,.5); }
+}
+.anim-title { animation: title-glow 4s ease-in-out infinite; }
+
+.anim-grid { animation: grid-pan 6s linear infinite; }
+
+@keyframes blob-a {
+  0%, 100% { transform: translate(-50%, 0) scale(1); opacity: .8; }
+  50% { transform: translate(-46%, 24px) scale(1.15); opacity: 1; }
+}
+.anim-blob-a { animation: blob-a 9s ease-in-out infinite; }
+@keyframes blob-b {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-40px, -30px) scale(1.2); }
+}
+.anim-blob-b { animation: blob-b 11s ease-in-out infinite; }
+@keyframes blob-c {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(36px, 30px) scale(1.18); }
+}
+.anim-blob-c { animation: blob-c 13s ease-in-out infinite; }
+
+.menu-grid-bg {
+  background-image:
+    linear-gradient(rgba(0,240,255,.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,240,255,.07) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 90% 80% at 50% 40%, black 30%, transparent 75%);
+}
+
+/* custom scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #07071a; }
+::-webkit-scrollbar-thumb { background: linear-gradient(#00f0ff, #ff2d78); border-radius: 8px; }
+
+/* range + canvas */
+canvas { display: block; }
+canvas.game-canvas {
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+kbd.key {
+  font-family: var(--font-display);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-bottom-width: 2px;
+  background: rgba(255,255,255,.06);
+}
