@@ -1,6 +1,9 @@
-/* NEON VOID — custom arena-survival engine.
-   Fixed-clamp loop, camera + shake + slow-mo, spatial-collected collisions,
-   7 enemy AIs, wave director, dash, combo, gems, boss patterns. */
+/* NEON VOID v2.1 — custom arena-survival engine.
+   Fixed-clamp loop, camera + shake + slow-mo, spatial-grid collisions,
+   9 enemy AIs, wave director with mutators, elites with affixes,
+   dash, combo, gems, power-ups, orbitals, boss spiral patterns.
+   Perf: baked glow sprites (no hot-loop shadowBlur), pooled bullets,
+   swap-remove sweeps, cached gradients, FPS-driven auto-quality. */
 
 import type {
   Difficulty,
@@ -10,18 +13,21 @@ import type {
   GameResult,
   Grade,
   HudSnapshot,
+  MutatorKind,
   PlayerStats,
   PowerUpKind,
   MinimapDot,
 } from './types';
-import { statsForShip } from './types';
+import { statsForShip, MUTATORS } from './types';
 import { SynthAudio } from './audio';
 import { ParticleSystem } from './particles';
+import { drawGlow } from './sprites';
 import {
   applyUpgrade, rollUpgrades, executionerMult, comboScoreMult, comboWindow, thornsDamage,
 } from './upgrades';
-import { angleTo, clamp, dist2, rand, TAU } from './utils';
+import { angleTo, clamp, dist2, rand, sweep, TAU } from './utils';
 import { saveBest, pushBoard, addTotals } from './storage';
+import { unlockAchievement, achievementDef } from './achievements';
 
 export const WORLD_W = 2600;
 export const WORLD_H = 2000;
@@ -45,7 +51,10 @@ interface Enemy {
   strafe: number;
   kx: number; ky: number;
   elite: boolean;
+  affix: 'none' | 'volatile' | 'swift';
   orbHitCd: number;
+  spiralT: number; // boss spiral pattern timer
+  spiralA: number; // boss spiral angle accumulator
 }
 
 interface Bullet {
@@ -57,7 +66,7 @@ interface Bullet {
   crit: boolean;
   friendly: boolean;
   dead: boolean;
-  hit: Set<number>;
+  hit: number[]; // enemy ids already struck (pooled, cleared on reuse)
 }
 
 interface Gem {
@@ -205,6 +214,28 @@ export class GameEngine {
   private ebullets: Bullet[] = [];
   private gems: Gem[] = [];
   private powerups: PowerUp[] = [];
+  // pooled bullets (reused to avoid GC churn)
+  private bulletPool: Bullet[] = [];
+  private ebulletPool: Bullet[] = [];
+  // uniform spatial grid for collisions (rebuilt each frame)
+  private grid: Map<number, Enemy[]> = new Map();
+  private static readonly GRID_CELL = 128;
+
+  // v2.1 speed: fps monitor + auto quality
+  private fpsEMA = 60;
+  private quality = 0; // 0 high, 1 medium, 2 low
+  private qualityT = 0;
+  private goodT = 0;
+  private baseParticleScale = 1;
+
+  // v2.1 features: wave mutator + boss/achievement tracking
+  private mutator: MutatorKind | null = null;
+  private bossDamageTaken = false;
+  private announced5min = false;
+
+  // cached background gradients (rebuilt on resize)
+  private bgGrad: CanvasGradient | null = null;
+  private vigGrad: CanvasGradient | null = null;
 
   private camX = 0;
   private camY = 0;
@@ -216,6 +247,7 @@ export class GameEngine {
     this.ctx = ctx;
     this.cb = cb;
     this.opts = opts;
+    this.baseParticleScale = opts.particleScale;
     this.fx.scale = opts.particleScale;
     this.audio.muted = opts.muted;
   }
@@ -231,6 +263,7 @@ export class GameEngine {
     this.audio.ensure();
     this.audio.startMusic();
     this.audio.waveStart();
+    document.addEventListener('visibilitychange', this.onVisibility);
     this.running = true;
     this.last = performance.now();
     const loop = (t: number) => {
@@ -245,9 +278,17 @@ export class GameEngine {
     this.destroyed = true;
     this.running = false;
     cancelAnimationFrame(this.raf);
+    document.removeEventListener('visibilitychange', this.onVisibility);
     this.detach();
     this.audio.stopMusic();
   }
+
+  private onVisibility = (): void => {
+    if (document.hidden && !this.destroyed && !this.paused && this.deathT < 0) {
+      // App toggles playing -> paused; no-op during upgrade/gameover overlays
+      this.cb.onPauseKey();
+    }
+  };
 
   setPaused(p: boolean): void {
     if (this.upgradeLock || this.deathT >= 0) {
@@ -273,7 +314,9 @@ export class GameEngine {
 
   setParticleScale(s: number): void {
     this.opts.particleScale = s;
-    this.fx.scale = s;
+    this.baseParticleScale = s;
+    const mult = this.quality === 0 ? 1 : this.quality === 1 ? 0.6 : 0.35;
+    this.fx.scale = s * mult;
   }
 
   setShakeEnabled(b: boolean): void {
@@ -284,6 +327,7 @@ export class GameEngine {
   applyUpgrade(id: string): void {
     applyUpgrade(this.stats, id);
     if (id === 'maxhp') this.hp = Math.min(this.stats.maxHp, this.hp + 25);
+    if (id === 'orbital' && this.stats.orbitals >= 3) this.grantAchievement('orbital3');
     this.taken.set(id, (this.taken.get(id) ?? 0) + 1);
     this.audio.upgradePick();
     this.fx.shockwave(this.px, this.py, '#a3ff12', 160, 0.5, 5);
@@ -344,9 +388,14 @@ export class GameEngine {
     this.gems = [];
     this.powerups = [];
     this.ghosts = [];
+    this.grid.clear();
     this.shieldT = 0; this.overdriveT = 0; this.magnetAllT = 0;
     this.powerupsCollected = 0;
     this.announce = null; this.announceT = 0;
+    this.mutator = null;
+    this.bossDamageTaken = false;
+    this.announced5min = false;
+    this.qualityT = 0; this.goodT = 0;
     this.gridPulse = 0; this.orbitalAngle = 0;
     this.deathT = -1;
     this.gameOverSent = false;
@@ -361,6 +410,72 @@ export class GameEngine {
 
   private quotaFor(w: number): number {
     return Math.round((6 + w * 4.5) * DIFF[this.opts.difficulty].quota);
+  }
+
+  // ---------- v2.1 helpers: spatial grid, pooling, achievements ----------
+
+  private static gridKey(cx: number, cy: number): number {
+    return cx * 73856093 ^ cy * 19349663;
+  }
+
+  /** rebuild the uniform grid from live enemies (called once per frame) */
+  private rebuildGrid(): void {
+    const g = this.grid;
+    g.clear();
+    const C = GameEngine.GRID_CELL;
+    for (const e of this.enemies) {
+      if (e.hp <= 0) continue;
+      const k = GameEngine.gridKey(
+        Math.floor(e.x / C), Math.floor(e.y / C),
+      );
+      let cell = g.get(k);
+      if (!cell) {
+        cell = [];
+        g.set(k, cell);
+      }
+      cell.push(e);
+    }
+  }
+
+  /** iterate enemies near (x, y) within radius (checks 3x3 cells) */
+  private forEachNear(x: number, y: number, radius: number, fn: (e: Enemy) => void): void {
+    const C = GameEngine.GRID_CELL;
+    const cx = Math.floor(x / C);
+    const cy = Math.floor(y / C);
+    const reach = Math.ceil(radius / C);
+    for (let ix = cx - reach; ix <= cx + reach; ix++) {
+      for (let iy = cy - reach; iy <= cy + reach; iy++) {
+        const cell = this.grid.get(GameEngine.gridKey(ix, iy));
+        if (!cell) continue;
+        for (const e of cell) fn(e);
+      }
+    }
+  }
+
+  private allocBullet(friendly: boolean): Bullet {
+    const pool = friendly ? this.bulletPool : this.ebulletPool;
+    const b = pool.pop();
+    if (b) {
+      b.dead = false;
+      b.hit.length = 0;
+      return b;
+    }
+    return {
+      x: 0, y: 0, vx: 0, vy: 0, r: 4, dmg: 0, pierce: 0,
+      life: 0, crit: false, friendly, dead: false, hit: [],
+    };
+  }
+
+  private freeBullet(b: Bullet): void {
+    const pool = b.friendly ? this.bulletPool : this.ebulletPool;
+    if (pool.length < 256) pool.push(b);
+  }
+
+  private grantAchievement(id: string): void {
+    if (!unlockAchievement(id)) return;
+    const def = achievementDef(id);
+    this.audio.powerup();
+    this.setAnnounce(`🏆 اچیومنت: ${def ? def.nameFa : id}`, 2.6);
   }
 
   // ---------- events ----------
@@ -491,11 +606,41 @@ export class GameEngine {
     const h = parent ? parent.clientHeight : window.innerHeight;
     this.viewW = Math.max(320, w);
     this.viewH = Math.max(320, h);
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    // DPR cap follows auto-quality level (0:2, 1:1.5, 2:1.15)
+    const cap = this.quality === 0 ? 2 : this.quality === 1 ? 1.5 : 1.15;
+    this.dpr = Math.min(cap, window.devicePixelRatio || 1);
     this.canvas.width = Math.round(this.viewW * this.dpr);
     this.canvas.height = Math.round(this.viewH * this.dpr);
     this.canvas.style.width = `${this.viewW}px`;
     this.canvas.style.height = `${this.viewH}px`;
+    // rebuild cached background gradients (was: allocated every frame)
+    const ctx = this.ctx;
+    const bg = ctx.createLinearGradient(0, 0, 0, this.viewH);
+    bg.addColorStop(0, '#07071c');
+    bg.addColorStop(1, '#050514');
+    this.bgGrad = bg;
+    const vg = ctx.createRadialGradient(
+      this.viewW / 2, this.viewH / 2, Math.min(this.viewW, this.viewH) * 0.42,
+      this.viewW / 2, this.viewH / 2, Math.max(this.viewW, this.viewH) * 0.75,
+    );
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.5)');
+    this.vigGrad = vg;
+  }
+
+  setAutoQuality(on: boolean): void {
+    this.opts.autoQuality = on;
+    if (!on && this.quality !== 0) {
+      this.quality = 0;
+      this.applyQuality();
+    }
+  }
+
+  private applyQuality(): void {
+    // particle scale steps: 1x / 0.6x / 0.35x of the user's base setting
+    const mult = this.quality === 0 ? 1 : this.quality === 1 ? 0.6 : 0.35;
+    this.fx.scale = this.baseParticleScale * mult;
+    this.resize(); // re-applies DPR cap + gradient cache
   }
 
   // ---------- loop ----------
@@ -507,6 +652,12 @@ export class GameEngine {
     if (raw <= 0) {
       this.render();
       return;
+    }
+    // fps monitor drives auto-quality (skipped while paused — no meaningful sample)
+    if (!this.paused && raw > 0) {
+      const fps = 1 / raw;
+      this.fpsEMA += (fps - this.fpsEMA) * 0.05;
+      this.updateQuality(raw);
     }
     if (this.paused) {
       this.render();
@@ -528,6 +679,29 @@ export class GameEngine {
     if (this.hudAcc >= 0.1) {
       this.hudAcc = 0;
       this.emitHud();
+    }
+  }
+
+  private updateQuality(raw: number): void {
+    if (!this.opts.autoQuality) return;
+    this.qualityT += raw;
+    if (this.qualityT < 2) return;
+    this.qualityT = 0;
+    if (this.fpsEMA < 45 && this.quality < 2) {
+      this.quality += 1;
+      this.goodT = 0;
+      this.applyQuality();
+      this.emitHud();
+    } else if (this.fpsEMA > 58 && this.quality > 0) {
+      this.goodT += 2;
+      if (this.goodT >= 6) {
+        this.goodT = 0;
+        this.quality -= 1;
+        this.applyQuality();
+        this.emitHud();
+      }
+    } else {
+      this.goodT = 0;
     }
   }
 
@@ -576,6 +750,9 @@ export class GameEngine {
       powerups: active,
       orbitals: this.stats.orbitals,
       dots,
+      fps: Math.round(this.fpsEMA),
+      quality: this.quality,
+      mutator: this.mutator,
     };
     this.cb.onHud(snap);
   }
@@ -626,6 +803,10 @@ export class GameEngine {
 
     this.time += dt;
     this.score += dt * (2 + this.wave * 0.6);
+    if (this.time >= 300 && !this.announced5min) {
+      this.announced5min = true;
+      this.grantAchievement('survivor5');
+    }
 
     // timers
     this.fireCd -= dt;
@@ -663,7 +844,7 @@ export class GameEngine {
     this.updateCamera(dt);
     this.fx.update(dt);
     for (const g of this.ghosts) g.life -= dt;
-    this.ghosts = this.ghosts.filter((g) => g.life > 0);
+    sweep(this.ghosts, (g) => g.life > 0);
     this.trauma = Math.max(0, this.trauma - dt * 1.6);
   }
 
@@ -771,20 +952,17 @@ export class GameEngine {
       const crit = Math.random() < this.stats.critChance;
       const dmg = this.stats.damage * od * (crit ? this.stats.critMult : 1) * rand(0.92, 1.08);
       const sp = this.stats.bulletSpeed;
-      this.bullets.push({
-        x: this.px + Math.cos(a) * 20,
-        y: this.py + Math.sin(a) * 20,
-        vx: Math.cos(a) * sp + this.pvx * 0.25,
-        vy: Math.sin(a) * sp + this.pvy * 0.25,
-        r: crit ? 6 : 4.5,
-        dmg,
-        pierce: this.stats.pierce,
-        life: 1.4,
-        crit,
-        friendly: true,
-        dead: false,
-        hit: new Set<number>(),
-      });
+      const b = this.allocBullet(true);
+      b.x = this.px + Math.cos(a) * 20;
+      b.y = this.py + Math.sin(a) * 20;
+      b.vx = Math.cos(a) * sp + this.pvx * 0.25;
+      b.vy = Math.sin(a) * sp + this.pvy * 0.25;
+      b.r = crit ? 6 : 4.5;
+      b.dmg = dmg;
+      b.pierce = this.stats.pierce;
+      b.life = 1.4;
+      b.crit = crit;
+      this.bullets.push(b);
     }
     this.fx.muzzle(this.px + Math.cos(base) * 22, this.py + Math.sin(base) * 22, base, '#00f0ff');
     this.audio.shoot();
@@ -802,9 +980,13 @@ export class GameEngine {
         this.cb.onWave(this.wave);
         this.emitHud();
         if (this.wave % 5 === 0) {
+          this.mutator = null;
           this.setAnnounce(`⚠ موج ${this.wave} — باس نزدیک است!`, 2.6);
           this.spawnBoss();
+        } else {
+          this.rollMutator();
         }
+        if (this.wave >= 10) this.grantAchievement('wave10');
       }
       return;
     }
@@ -813,7 +995,9 @@ export class GameEngine {
     const aliveWeight = this.enemies.length;
     const cap = Math.min(130, 14 + this.wave * 5);
     if (this.spawnT <= 0 && aliveWeight < cap && this.waveKills < this.waveQuota) {
-      this.spawnT = Math.max(0.16, (rand(0.5, 1.1) - this.wave * 0.045) * d.interval);
+      let interval = Math.max(0.16, (rand(0.5, 1.1) - this.wave * 0.045) * d.interval);
+      if (this.mutator === 'swarm') interval *= 0.55;
+      this.spawnT = interval;
       const batch = this.wave >= 7 ? rand(1, 10) < 3 ? 2 : 1 : 1;
       for (let i = 0; i < batch; i++) this.spawnEnemy();
     }
@@ -829,6 +1013,32 @@ export class GameEngine {
       }
       this.intermission = 3.2;
       this.emitHud();
+    }
+  }
+
+  /** v2.1: every 3rd non-boss wave (from wave 3) rolls a mutator */
+  private rollMutator(): void {
+    if (this.wave < 3 || this.wave % 3 !== 0) {
+      this.mutator = null;
+      return;
+    }
+    const kinds: MutatorKind[] = ['swarm', 'snipers', 'elite_hunt', 'surge'];
+    this.mutator = kinds[Math.floor(Math.random() * kinds.length)];
+    const def = MUTATORS[this.mutator];
+    this.setAnnounce(`🌀 موتاتور: ${def.nameFa}! (امتیاز ×${def.scoreMult})`, 2.6);
+    if (this.mutator === 'elite_hunt') {
+      for (let i = 0; i < 3; i++) {
+        const p = this.spawnPos();
+        const e = this.makeEnemy(this.pickKind(), p.x, p.y);
+        if (!e.elite) {
+          e.elite = true;
+          e.hp = e.maxHp = Math.round(e.maxHp * 3.2);
+          e.xp *= 5;
+          e.score *= 4;
+          e.r *= 1.22;
+        }
+        this.enemies.push(e);
+      }
     }
   }
 
@@ -850,6 +1060,9 @@ export class GameEngine {
   }
 
   private pickKind(): EnemyKind {
+    if (this.mutator === 'snipers' && this.wave >= 6 && Math.random() < 0.45) {
+      return 'sniper';
+    }
     const w = this.wave;
     const bag: EnemyKind[] = ['chaser', 'chaser', 'chaser'];
     if (w >= 2) bag.push('weaver', 'weaver');
@@ -875,7 +1088,8 @@ export class GameEngine {
       r: 16, hp: 30, maxHp: 30, speed: 130, dmg: 12,
       xp: 6, score: 25, t: 0, flash: 0, fireCd: rand(1, 2.5),
       state: 0, stateT: 0, lockDx: 0, lockDy: 0, strafe: Math.random() < 0.5 ? -1 : 1,
-      kx: 0, ky: 0, elite: false, orbHitCd: 0,
+      kx: 0, ky: 0, elite: false, affix: 'none', orbHitCd: 0,
+      spiralT: 0, spiralA: Math.random() * TAU,
     };
     switch (kind) {
       case 'chaser':
@@ -937,6 +1151,11 @@ export class GameEngine {
       }
     }
     base.hp = base.maxHp = Math.round(base.hp);
+    // surge mutator: faster enemies
+    if (this.mutator === 'surge' && kind !== 'boss') {
+      base.speed *= 1.25;
+      base.score = Math.round(base.score * MUTATORS.surge.scoreMult);
+    }
     // elite roll (not for mini/boss)
     if (kind !== 'boss' && kind !== 'mini' && Math.random() < this.eliteChance()) {
       base.elite = true;
@@ -946,6 +1165,15 @@ export class GameEngine {
       base.score *= 4;
       base.r *= 1.22;
       base.speed *= 1.06;
+      // v2.1 elite affix: volatile explodes, swift is faster
+      const roll = Math.random();
+      if (roll < 0.35) {
+        base.affix = 'volatile';
+        base.score = Math.round(base.score * 1.25);
+      } else if (roll < 0.65) {
+        base.affix = 'swift';
+        base.speed *= 1.3;
+      }
     }
     return base;
   }
@@ -965,11 +1193,24 @@ export class GameEngine {
     const boss = this.makeEnemy('boss', p.x, p.y);
     this.enemies.push(boss);
     this.boss = boss;
+    this.bossDamageTaken = false;
     this.audio.bossSpawn();
     this.trauma = Math.min(1, this.trauma + 0.7);
     this.fx.shockwave(p.x, p.y, '#ff2244', 320, 0.8, 7);
     this.fx.text(p.x, p.y - 60, 'BOSS', '#ff2244', 30);
     this.slowmoT = 0.7;
+  }
+
+  /** pooled enemy bullet spawn (no allocation in hot path) */
+  private fireEnemyBullet(
+    x: number, y: number, vx: number, vy: number,
+    r: number, dmg: number, life: number,
+  ): void {
+    const b = this.allocBullet(false);
+    b.x = x; b.y = y; b.vx = vx; b.vy = vy;
+    b.r = r; b.dmg = dmg; b.life = life;
+    b.pierce = 0; b.crit = false;
+    this.ebullets.push(b);
   }
 
   private updateBullets(dt: number): void {
@@ -985,8 +1226,31 @@ export class GameEngine {
       b.life -= dt;
       if (b.life <= 0 || b.x < 0 || b.y < 0 || b.x > WORLD_W || b.y > WORLD_H) b.dead = true;
     }
-    this.bullets = this.bullets.filter((b) => !b.dead);
-    this.ebullets = this.ebullets.filter((b) => !b.dead);
+    // swap-remove + recycle into pools (no per-frame allocation)
+    let i = 0;
+    while (i < this.bullets.length) {
+      if (this.bullets[i].dead) {
+        const last = this.bullets.length - 1;
+        const tmp = this.bullets[i];
+        this.bullets[i] = this.bullets[last];
+        this.bullets.pop();
+        this.freeBullet(tmp);
+      } else {
+        i++;
+      }
+    }
+    let j = 0;
+    while (j < this.ebullets.length) {
+      if (this.ebullets[j].dead) {
+        const last = this.ebullets.length - 1;
+        const tmp = this.ebullets[j];
+        this.ebullets[j] = this.ebullets[last];
+        this.ebullets.pop();
+        this.freeBullet(tmp);
+      } else {
+        j++;
+      }
+    }
   }
 
   private updateEnemies(dt: number): void {
@@ -1078,11 +1342,7 @@ export class GameEngine {
             e.fireCd = rand(1.7, 2.6);
             const a = angleTo(e.x, e.y, px, py);
             const sp = 300 + this.wave * 8;
-            this.ebullets.push({
-              x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-              r: 6, dmg: e.dmg, pierce: 0, life: 3.2, crit: false,
-              friendly: false, dead: false, hit: new Set<number>(),
-            });
+            this.fireEnemyBullet(e.x, e.y, Math.cos(a) * sp, Math.sin(a) * sp, 6, e.dmg, 3.2);
             this.audio.enemyShoot();
             this.fx.muzzle(e.x, e.y, a, '#b14bff');
           }
@@ -1109,12 +1369,7 @@ export class GameEngine {
               e.state = 0;
               e.fireCd = rand(2.2, 3.2);
               const sp = 520 + this.wave * 10;
-              this.ebullets.push({
-                x: e.x, y: e.y,
-                vx: e.lockDx * sp, vy: e.lockDy * sp,
-                r: 5, dmg: e.dmg, pierce: 0, life: 2.6, crit: false,
-                friendly: false, dead: false, hit: new Set<number>(),
-              });
+              this.fireEnemyBullet(e.x, e.y, e.lockDx * sp, e.lockDy * sp, 5, e.dmg, 2.6);
               this.audio.sniperShot();
               this.fx.muzzle(e.x, e.y, Math.atan2(e.lockDy, e.lockDx), '#ff5df2');
             }
@@ -1138,14 +1393,25 @@ export class GameEngine {
             const off = Math.random() * TAU;
             for (let i = 0; i < n; i++) {
               const a = off + (i / n) * TAU;
-              this.ebullets.push({
-                x: e.x, y: e.y, vx: Math.cos(a) * 240, vy: Math.sin(a) * 240,
-                r: 7, dmg: e.dmg * 0.7, pierce: 0, life: 4, crit: false,
-                friendly: false, dead: false, hit: new Set<number>(),
-              });
+              this.fireEnemyBullet(e.x, e.y, Math.cos(a) * 240, Math.sin(a) * 240, 7, e.dmg * 0.7, 4);
             }
             this.audio.enemyShoot();
             this.fx.shockwave(e.x, e.y, '#ff2244', 160, 0.4, 4);
+          }
+          // v2.1: spiral pattern below 55% HP (faster when enraged)
+          if (e.hp < e.maxHp * 0.55) {
+            e.spiralT -= dt;
+            if (e.spiralT <= 0) {
+              e.spiralT = enraged ? 0.14 : 0.22;
+              e.spiralA += 0.55;
+              for (let k = 0; k < 2; k++) {
+                const a = e.spiralA + k * Math.PI;
+                this.fireEnemyBullet(
+                  e.x, e.y, Math.cos(a) * 200, Math.sin(a) * 200,
+                  6, e.dmg * 0.55, 4.5,
+                );
+              }
+            }
           }
           // charge
           e.stateT -= dt;
@@ -1201,28 +1467,22 @@ export class GameEngine {
   }
 
   private collide(_dt: number): void {
-    // friendly bullets vs enemies
+    this.rebuildGrid();
+    // friendly bullets vs enemies (spatial grid: only nearby cells)
     for (const b of this.bullets) {
       if (b.dead) continue;
-      for (const e of this.enemies) {
-        if (e.hp <= 0 || b.hit.has(e.id)) continue;
+      this.forEachNear(b.x, b.y, 64, (e) => {
+        if (b.dead || e.hp <= 0 || b.hit.indexOf(e.id) >= 0) return;
         const rr = b.r + e.r;
         if (dist2(b.x, b.y, e.x, e.y) < rr * rr) {
-          b.hit.add(e.id);
+          b.hit.push(e.id);
           this.damageEnemy(e, b.dmg, b.crit, b.vx, b.vy);
-          if (b.hit.size > b.pierce) {
-            b.dead = true;
-            break;
-          }
+          if (b.hit.length > b.pierce) b.dead = true;
         }
-      }
+      });
     }
-    // cleanup dead enemies
-    const dead = this.enemies.filter((e) => e.hp <= 0);
-    if (dead.length > 0) {
-      for (const e of dead) this.killEnemy(e);
-      this.enemies = this.enemies.filter((e) => e.hp > 0);
-    }
+    // cleanup dead enemies (sweep, no allocation)
+    this.sweepDeadEnemies();
 
     if (this.deathT >= 0) return;
 
@@ -1236,9 +1496,9 @@ export class GameEngine {
         this.damagePlayer(b.dmg, b.x, b.y);
       }
     }
-    // enemies vs player
+    // enemies vs player (only nearby cells around the player)
     const thorns = thornsDamage(this.taken);
-    for (const e of this.enemies) {
+    this.forEachNear(this.px, this.py, 96, (e) => {
       const rr = e.r + pr - 2;
       if (dist2(e.x, e.y, this.px, this.py) < rr * rr) {
         this.damagePlayer(e.dmg, e.x, e.y);
@@ -1250,8 +1510,22 @@ export class GameEngine {
         e.kx += Math.cos(a) * 180;
         e.ky += Math.sin(a) * 180;
       }
+    });
+    sweep(this.ebullets, (b) => !b.dead);
+    // thorns may have killed enemies — sweep again
+    this.sweepDeadEnemies();
+  }
+
+  /** kill + remove dead enemies in place (shared by collide/orbitals) */
+  private sweepDeadEnemies(): void {
+    let any = false;
+    for (const e of this.enemies) {
+      if (e.hp <= 0) {
+        this.killEnemy(e);
+        any = true;
+      }
     }
-    this.ebullets = this.ebullets.filter((b) => !b.dead);
+    if (any) sweep(this.enemies, (e) => e.hp > 0);
   }
 
   private damageEnemy(e: Enemy, dmg: number, crit: boolean, vx: number, vy: number): void {
@@ -1281,11 +1555,23 @@ export class GameEngine {
     this.comboT = comboWindow(this.taken);
     this.maxCombo = Math.max(this.maxCombo, this.combo);
     const comboMult = 1 + Math.min(2 + (this.taken.get('combomaster') ?? 0), this.combo * 0.02 * comboScoreMult(this.taken));
-    const pts = e.score * (1 + this.wave * 0.08) * comboMult;
+    const mutMult = this.mutator ? MUTATORS[this.mutator].scoreMult : 1;
+    const pts = e.score * (1 + this.wave * 0.08) * comboMult * mutMult;
     this.score += pts;
+    if (this.kills === 1) this.grantAchievement('first_blood');
+    if (this.combo === 50) this.grantAchievement('combo50');
     if (e.elite) {
       this.elites += 1;
+      if (this.elites === 5) this.grantAchievement('elite5');
       this.setAnnounce(`الیت نابود شد! +${Math.round(pts)}`, 1.8);
+      // volatile affix: radial burst on death (pooled bullets)
+      if (e.affix === 'volatile') {
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * TAU + rand(-0.1, 0.1);
+          this.fireEnemyBullet(e.x, e.y, Math.cos(a) * 220, Math.sin(a) * 220, 6, e.dmg * 0.6, 3);
+        }
+        this.fx.shockwave(e.x, e.y, '#ff7a2a', 130, 0.4, 5);
+      }
     }
 
     const big = e.kind === 'boss' || e.kind === 'splitter' || e.kind === 'tank' || e.elite;
@@ -1300,6 +1586,8 @@ export class GameEngine {
       this.slowmoT = 1.0;
       this.fx.text(e.x, e.y, `+${Math.round(pts)}`, '#ffd319', 26);
       this.dropPowerup(e.x, e.y, true);
+      this.grantAchievement('boss1');
+      if (!this.bossDamageTaken) this.grantAchievement('flawless_boss');
       // shower of gems
       for (let i = 0; i < 14; i++) {
         this.gems.push({
@@ -1375,7 +1663,7 @@ export class GameEngine {
         this.collectPowerup(p.kind);
       }
     }
-    this.powerups = this.powerups.filter((p) => p.life > 0);
+    this.powerups = sweep(this.powerups, (p) => p.life > 0);
   }
 
   private collectPowerup(kind: PowerUpKind): void {
@@ -1409,6 +1697,7 @@ export class GameEngine {
     this.fx.shockwave(this.px, this.py, '#ff5d2a', 700, 0.8, 10);
     this.fx.explosion(this.px, this.py, '#ffd319', 60, 600);
     const dead = [...this.enemies];
+    let nukeKills = 0;
     for (const e of dead) {
       if (e.kind === 'boss') {
         this.damageEnemy(e, e.maxHp * 0.35, false, 0, -1);
@@ -1416,9 +1705,14 @@ export class GameEngine {
         e.hp = 0;
       }
     }
-    const gone = this.enemies.filter((e) => e.hp <= 0);
-    for (const e of gone) this.killEnemy(e);
-    this.enemies = this.enemies.filter((e) => e.hp > 0);
+    for (const e of this.enemies) {
+      if (e.hp <= 0) {
+        this.killEnemy(e);
+        nukeKills++;
+      }
+    }
+    sweep(this.enemies, (e) => e.hp > 0);
+    if (nukeKills >= 20) this.grantAchievement('nuke20');
     this.setAnnounce('انفجار هسته‌ای!', 2);
   }
 
@@ -1432,22 +1726,18 @@ export class GameEngine {
       const a = this.orbitalAngle + (i / n) * TAU;
       const ox = this.px + Math.cos(a) * R;
       const oy = this.py + Math.sin(a) * R;
-      for (const e of this.enemies) {
-        if (e.hp <= 0 || e.orbHitCd > 0) continue;
+      this.forEachNear(ox, oy, 96, (e) => {
+        if (e.hp <= 0 || e.orbHitCd > 0) return;
         const rr = e.r + 13;
         if (dist2(ox, oy, e.x, e.y) < rr * rr) {
           e.orbHitCd = 0.35;
           const ka = angleTo(e.x, e.y, ox, oy);
           this.damageEnemy(e, dmg, false, Math.cos(ka) * 300, Math.sin(ka) * 300);
         }
-      }
+      });
     }
     // cleanup orbital kills immediately so blades feel responsive
-    const dead = this.enemies.filter((e) => e.hp <= 0);
-    if (dead.length > 0) {
-      for (const e of dead) this.killEnemy(e);
-      this.enemies = this.enemies.filter((e) => e.hp > 0);
-    }
+    this.sweepDeadEnemies();
   }
 
   private damagePlayer(raw: number, fromX: number, fromY: number): void {
@@ -1461,6 +1751,7 @@ export class GameEngine {
     }
     const dmg = Math.max(1, raw - this.stats.armor);
     this.hp -= dmg;
+    if (this.boss) this.bossDamageTaken = true;
     this.invuln = 0.55;
     this.combo = 0;
     this.comboT = 0;
@@ -1528,7 +1819,7 @@ export class GameEngine {
     if (this.gems.length > 400) {
       this.gems.splice(0, this.gems.length - 400);
     }
-    this.gems = this.gems.filter((g) => g.t > -100);
+    sweep(this.gems, (g) => g.t > -100);
   }
 
   private updateCamera(_dt: number): void {
@@ -1548,11 +1839,8 @@ export class GameEngine {
   private render(): void {
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    // bg
-    const bg = ctx.createLinearGradient(0, 0, 0, this.viewH);
-    bg.addColorStop(0, '#07071c');
-    bg.addColorStop(1, '#050514');
-    ctx.fillStyle = bg;
+    // bg (cached gradient — was allocated every frame)
+    ctx.fillStyle = this.bgGrad ?? '#050514';
     ctx.fillRect(0, 0, this.viewW, this.viewH);
 
     let shX = 0;
@@ -1567,6 +1855,15 @@ export class GameEngine {
 
     // stars (screen space parallax)
     this.fx.drawStars(ctx, { x: camX, y: camY }, this.viewW, this.viewH);
+
+    // v2.1: nebula blobs — 3 baked radial sprites, screen-space, near-zero cost
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const t = performance.now() / 1000;
+    drawGlow(ctx, '#1a2a6c', this.viewW * 0.22 + Math.sin(t * 0.07) * 30, this.viewH * 0.3, 320, 0.5);
+    drawGlow(ctx, '#4a1140', this.viewW * 0.8 + Math.cos(t * 0.05) * 40, this.viewH * 0.65, 380, 0.45);
+    drawGlow(ctx, '#0b3b4a', this.viewW * 0.55, this.viewH * 0.9 + Math.sin(t * 0.06) * 26, 300, 0.4);
+    ctx.restore();
 
     ctx.save();
     ctx.translate(-camX, -camY);
@@ -1589,44 +1886,41 @@ export class GameEngine {
     }
     ctx.stroke();
 
-    // arena border
+    // arena border (layered strokes instead of shadowBlur)
+    ctx.strokeStyle = 'rgba(0,240,255,0.16)';
+    ctx.lineWidth = 9;
+    ctx.strokeRect(0, 0, WORLD_W, WORLD_H);
     ctx.strokeStyle = 'rgba(0,240,255,0.5)';
     ctx.lineWidth = 3;
-    ctx.shadowColor = '#00f0ff';
-    ctx.shadowBlur = 18;
     ctx.strokeRect(0, 0, WORLD_W, WORLD_H);
-    ctx.shadowBlur = 0;
 
-    // gems
+    // gems (baked glow sprite + plain diamond — no shadowBlur)
     for (const g of this.gems) {
+      drawGlow(ctx, '#a3ff12', g.x, g.y, 12, 0.8);
       const pulse = 1 + Math.sin(g.t * 6) * 0.18;
       ctx.save();
       ctx.translate(g.x, g.y);
       ctx.rotate(Math.PI / 4);
       ctx.fillStyle = '#a3ff12';
-      ctx.shadowColor = '#a3ff12';
-      ctx.shadowBlur = 10;
       const s = 5.5 * pulse;
       ctx.fillRect(-s / 2, -s / 2, s, s);
       ctx.restore();
     }
 
-    // powerups (world space, bobbing + glow ring)
+    // powerups (world space, bobbing + glow ring; baked glow, no shadow)
     const nowMs = performance.now();
     for (const p of this.powerups) {
       const bob = Math.sin((nowMs / 300) + p.x) * 4;
       const blink = p.life < 5 ? (Math.sin(nowMs / 120) > 0 ? 1 : 0.35) : 1;
+      drawGlow(ctx, POWERUP_COLOR[p.kind], p.x, p.y + bob, 30, blink);
       ctx.save();
       ctx.globalAlpha = blink;
       ctx.translate(p.x, p.y + bob);
       ctx.strokeStyle = POWERUP_COLOR[p.kind];
       ctx.lineWidth = 2;
-      ctx.shadowColor = POWERUP_COLOR[p.kind];
-      ctx.shadowBlur = 16;
       ctx.beginPath();
       ctx.arc(0, 0, 15, 0, TAU);
       ctx.stroke();
-      ctx.shadowBlur = 0;
       ctx.fillStyle = POWERUP_COLOR[p.kind];
       ctx.font = '13px sans-serif';
       ctx.textAlign = 'center';
@@ -1661,12 +1955,13 @@ export class GameEngine {
       ctx.restore();
     }
 
-    // orbital blades
+    // orbital blades (baked glow + plain blade)
     if (this.stats.orbitals > 0 && this.deathT < 0) {
       for (let i = 0; i < this.stats.orbitals; i++) {
         const a = this.orbitalAngle + (i / this.stats.orbitals) * TAU;
         const ox = this.px + Math.cos(a) * 74;
         const oy = this.py + Math.sin(a) * 74;
+        drawGlow(ctx, '#ffd319', ox, oy, 22, 0.85);
         ctx.save();
         ctx.translate(ox, oy);
         ctx.rotate(a * 3);
@@ -1675,8 +1970,6 @@ export class GameEngine {
         ctx.arc(0, 0, 16, 0, TAU);
         ctx.fill();
         ctx.fillStyle = '#ffd319';
-        ctx.shadowColor = '#ffd319';
-        ctx.shadowBlur = 14;
         ctx.beginPath();
         ctx.moveTo(11, 0);
         ctx.lineTo(-7, 8);
@@ -1687,33 +1980,32 @@ export class GameEngine {
       }
     }
 
-    // friendly bullets
+    // friendly bullets (baked glow streaks — no shadow, no per-bullet save for core)
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (const b of this.bullets) {
+      const col = b.crit ? '#ffd319' : '#00f0ff';
+      drawGlow(ctx, col, b.x, b.y, 14, 0.9);
       const a = Math.atan2(b.vy, b.vx);
       ctx.save();
       ctx.translate(b.x, b.y);
       ctx.rotate(a);
-      ctx.fillStyle = b.crit ? '#ffd319' : '#00f0ff';
-      ctx.shadowColor = b.crit ? '#ffd319' : '#00f0ff';
-      ctx.shadowBlur = 12;
+      ctx.fillStyle = col;
       ctx.fillRect(-10, -2.2, 20, 4.4);
+      ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(8, 0, b.r * 0.7, 0, TAU);
+      ctx.arc(8, 0, b.r * 0.45, 0, TAU);
       ctx.fill();
       ctx.restore();
     }
-    // enemy bullets
+    // enemy bullets (baked glow + core)
     for (const b of this.ebullets) {
+      drawGlow(ctx, '#ff2d78', b.x, b.y, b.r + 8, 0.9);
       ctx.fillStyle = '#ff2d78';
-      ctx.shadowColor = '#ff2d78';
-      ctx.shadowBlur = 14;
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.r, 0, TAU);
       ctx.fill();
       ctx.fillStyle = '#fff';
-      ctx.shadowBlur = 0;
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.r * 0.35, 0, TAU);
       ctx.fill();
@@ -1730,15 +2022,11 @@ export class GameEngine {
 
     ctx.restore();
 
-    // vignette
-    const vg = ctx.createRadialGradient(
-      this.viewW / 2, this.viewH / 2, Math.min(this.viewW, this.viewH) * 0.42,
-      this.viewW / 2, this.viewH / 2, Math.max(this.viewW, this.viewH) * 0.75,
-    );
-    vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.5)');
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, this.viewW, this.viewH);
+    // vignette (cached gradient)
+    if (this.vigGrad) {
+      ctx.fillStyle = this.vigGrad;
+      ctx.fillRect(0, 0, this.viewW, this.viewH);
+    }
 
     // low hp pulse
     const hpFrac = this.hp / this.stats.maxHp;
@@ -1788,13 +2076,10 @@ export class GameEngine {
 
   private drawPlayer(ctx: CanvasRenderingContext2D): void {
     const col = this.shipColor();
+    // baked glow sprite behind ship (was: alpha arc + shadowBlur hull)
+    drawGlow(ctx, col, this.px, this.py, 34, 0.55);
     ctx.save();
     ctx.translate(this.px, this.py);
-    // glow
-    ctx.fillStyle = 'rgba(0,240,255,0.14)';
-    ctx.beginPath();
-    ctx.arc(0, 0, 30, 0, TAU);
-    ctx.fill();
     // overdrive aura
     if (this.overdriveT > 0) {
       ctx.fillStyle = 'rgba(255,211,25,0.16)';
@@ -1804,23 +2089,25 @@ export class GameEngine {
     }
     // dash trail direction
     ctx.rotate(this.aim);
-    // engine flame
+    // engine flame (layered alpha instead of shadowBlur)
     const flame = 12 + Math.sin(performance.now() / 60) * 4 + Math.hypot(this.pvx, this.pvy) / 60;
+    ctx.fillStyle = 'rgba(255,159,28,0.35)';
+    ctx.beginPath();
+    ctx.moveTo(-12, 10);
+    ctx.lineTo(-12 - flame - 6, 0);
+    ctx.lineTo(-12, -10);
+    ctx.closePath();
+    ctx.fill();
     ctx.fillStyle = '#ff9f1c';
-    ctx.shadowColor = '#ff9f1c';
-    ctx.shadowBlur = 14;
     ctx.beginPath();
     ctx.moveTo(-12, 7);
     ctx.lineTo(-12 - flame, 0);
     ctx.lineTo(-12, -7);
     ctx.closePath();
     ctx.fill();
-    // hull
-    ctx.shadowColor = col;
-    ctx.shadowBlur = 18;
+    // hull (outer glow stroke replaces shadowBlur)
     ctx.fillStyle = '#0b1026';
     ctx.strokeStyle = col;
-    ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.moveTo(18, 0);
     ctx.lineTo(-12, 12);
@@ -1828,23 +2115,26 @@ export class GameEngine {
     ctx.lineTo(-12, -12);
     ctx.closePath();
     ctx.fill();
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 6;
     ctx.stroke();
-    // cockpit
-    ctx.shadowBlur = 8;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    // cockpit dot
     ctx.fillStyle = col;
     ctx.beginPath();
     ctx.arc(3, 0, 4.2, 0, TAU);
     ctx.fill();
     ctx.restore();
 
-    // energy shield bubble (powerup)
+    // energy shield bubble (powerup) — baked glow, no shadow
     if (this.shieldT > 0) {
+      drawGlow(ctx, '#00e5ff', this.px, this.py, 44, 0.7);
       ctx.save();
       ctx.globalAlpha = 0.55 + Math.sin(performance.now() / 140) * 0.15;
       ctx.strokeStyle = '#00e5ff';
       ctx.lineWidth = 2.5;
-      ctx.shadowColor = '#00e5ff';
-      ctx.shadowBlur = 18;
       ctx.beginPath();
       ctx.arc(this.px, this.py, 30, 0, TAU);
       ctx.stroke();
@@ -1871,6 +2161,11 @@ export class GameEngine {
 
   private drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy): void {
     const color = e.elite ? '#ffd319' : ENEMY_COLOR[e.kind];
+    // baked glow sprite (was: alpha disc + shadowBlur on every stroke)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    drawGlow(ctx, color, e.x, e.y, e.r + 14, e.elite ? 0.85 : 0.6);
+    ctx.restore();
     ctx.save();
     ctx.translate(e.x, e.y);
     const face = angleTo(e.x, e.y, this.px, this.py);
@@ -1878,14 +2173,6 @@ export class GameEngine {
 
     const flash = e.flash > 0.3;
     const body = flash ? '#ffffff' : color;
-
-    // soft glow disc
-    ctx.fillStyle = color;
-    ctx.globalAlpha = e.elite ? 0.3 : 0.16;
-    ctx.beginPath();
-    ctx.arc(0, 0, e.r + 9, 0, TAU);
-    ctx.fill();
-    ctx.globalAlpha = 1;
 
     // elite outer ring (rotates opposite)
     if (e.elite) {
@@ -1897,14 +2184,13 @@ export class GameEngine {
       ctx.beginPath();
       ctx.arc(0, 0, e.r + 5, 0, TAU);
       ctx.stroke();
+      ctx.setLineDash([]);
       ctx.restore();
     }
 
     ctx.fillStyle = '#0a0a1c';
     ctx.strokeStyle = body;
     ctx.lineWidth = e.kind === 'boss' ? 4 : 2.5;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = e.elite ? 20 : 12;
 
     ctx.beginPath();
     if (e.kind === 'chaser') {
@@ -1973,7 +2259,6 @@ export class GameEngine {
     }
     ctx.fill();
     ctx.stroke();
-    ctx.shadowBlur = 0;
 
     // core
     ctx.fillStyle = body;

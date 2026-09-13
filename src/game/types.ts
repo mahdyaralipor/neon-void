@@ -48,6 +48,22 @@ export type EnemyKind =
 
 export type PowerUpKind = 'shield' | 'magnet' | 'nuke' | 'overdrive' | 'heal';
 
+export type MutatorKind = 'swarm' | 'snipers' | 'elite_hunt' | 'surge';
+
+export interface MutatorDef {
+  kind: MutatorKind;
+  nameFa: string;
+  nameEn: string;
+  scoreMult: number;
+}
+
+export const MUTATORS: Record<MutatorKind, MutatorDef> = {
+  swarm: { kind: 'swarm', nameFa: 'هجوم گروهی', nameEn: 'SWARM', scoreMult: 1.5 },
+  snipers: { kind: 'snipers', nameFa: 'لانه اسنایپر', nameEn: 'SNIPER NEST', scoreMult: 1.3 },
+  elite_hunt: { kind: 'elite_hunt', nameFa: 'شکار الیت', nameEn: 'ELITE HUNT', scoreMult: 1.4 },
+  surge: { kind: 'surge', nameFa: 'موج سرعت', nameEn: 'SPEED SURGE', scoreMult: 1.3 },
+};
+
 export interface PlayerStats {
   damage: number;
   fireRate: number; // shots per second
@@ -119,10 +135,11 @@ export interface UpgradeDef {
 
 export interface EngineOptions {
   difficulty: Difficulty;
-  particleScale: number; // 0..1
+  particleScale: number; // 0..1 (base; auto-quality may scale down at runtime)
   shakeEnabled: boolean;
   muted: boolean;
   ship: ShipId;
+  autoQuality: boolean;
 }
 
 export interface MinimapDot {
@@ -166,6 +183,9 @@ export interface HudSnapshot {
   powerups: PowerUpState[];
   orbitals: number;
   dots: MinimapDot[];
+  fps: number;
+  quality: number; // 0 high, 1 medium, 2 low (auto-quality level)
+  mutator: MutatorKind | null;
 }
 
 export type Grade = 'S' | 'A' | 'B' | 'C' | 'D';

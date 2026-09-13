@@ -1,14 +1,15 @@
 import {
   Heart, Pause, Star, Swords, Timer, Volume2, VolumeX, Wind,
-  Shield, Magnet, Flame, Crown,
+  Shield, Magnet, Flame, Crown, Gauge, Sparkles,
 } from 'lucide-react';
-import type { HudSnapshot, PowerUpKind } from '../game/types';
+import { MUTATORS, type HudSnapshot, type PowerUpKind } from '../game/types';
 import { formatScore, formatTime } from '../game/utils';
 import Minimap from './Minimap';
 
 interface Props {
   hud: HudSnapshot;
   muted: boolean;
+  showFps: boolean;
   onPause: () => void;
   onMute: () => void;
   onDash: () => void;
@@ -30,10 +31,11 @@ const POWERUP_ICON: Record<PowerUpKind, typeof Shield> = {
   heal: Heart,
 };
 
-export default function HUD({ hud, muted, onPause, onMute, onDash }: Props) {
+export default function HUD({ hud, muted, showFps, onPause, onMute, onDash }: Props) {
   const hpFrac = Math.max(0, hud.hp / Math.max(1, hud.maxHp));
   const xpFrac = Math.min(1, hud.xp / Math.max(1, hud.xpNext));
   const dashFrac = 1 - hud.dashCd / Math.max(0.01, hud.dashMax);
+  const mut = hud.mutator ? MUTATORS[hud.mutator] : null;
 
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
@@ -49,6 +51,31 @@ export default function HUD({ hud, muted, onPause, onMute, onDash }: Props) {
       {hud.announce && (
         <div key={hud.announce} className="anim-announce mx-auto mt-2 w-fit rounded-full border border-yellow-300/40 bg-black/60 px-5 py-1.5 text-sm font-black text-yellow-200 shadow-[0_0_24px_rgba(255,211,25,0.35)] backdrop-blur-sm">
           {hud.announce}
+        </div>
+      )}
+
+      {/* mutator + fps badges */}
+      {(mut || showFps) && (
+        <div className="mx-auto mt-1.5 flex w-fit items-center gap-2">
+          {mut && (
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-violet-400/40 bg-violet-500/15 px-3 py-0.5 text-[11px] font-black text-violet-200 backdrop-blur-sm" dir="ltr">
+              <Sparkles size={12} /> {mut.nameEn} · ×{mut.scoreMult}
+            </div>
+          )}
+          {showFps && (
+            <div
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-0.5 font-display text-[11px] font-bold backdrop-blur-sm ${
+                hud.fps >= 50
+                  ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-300'
+                  : hud.fps >= 30
+                    ? 'border-yellow-400/30 bg-yellow-500/10 text-yellow-300'
+                    : 'border-red-400/40 bg-red-500/10 text-red-300'
+              }`}
+              dir="ltr"
+            >
+              <Gauge size={12} /> {hud.fps} FPS{hud.quality > 0 ? ` · Q${hud.quality}` : ''}
+            </div>
+          )}
         </div>
       )}
 

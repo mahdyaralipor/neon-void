@@ -33,6 +33,7 @@ export default function GameCanvas({ settings, paused, callbacks, onEngine }: Pr
       shakeEnabled: settings.shake,
       muted: settings.muted,
       ship: settings.ship,
+      autoQuality: settings.autoQuality,
     };
     const engine = new GameEngine(canvas, stable, opts);
     engineRef.current = engine;
@@ -70,7 +71,8 @@ export default function GameCanvas({ settings, paused, callbacks, onEngine }: Pr
     e.setParticleScale(settings.particles);
     e.setShakeEnabled(settings.shake);
     e.setVolumes(settings.musicVol, settings.sfxVol);
-  }, [settings.muted, settings.particles, settings.shake, settings.musicVol, settings.sfxVol]);
+    e.setAutoQuality(settings.autoQuality);
+  }, [settings.muted, settings.particles, settings.shake, settings.musicVol, settings.sfxVol, settings.autoQuality]);
 
   return (
     <div className="absolute inset-0">

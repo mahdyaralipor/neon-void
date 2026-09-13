@@ -1,10 +1,25 @@
 import {
   Play, Settings, Trophy, Volume2, VolumeX, Gamepad2, Zap, Shield,
   Star, Rocket, Ghost, Anchor, Medal, Swords, Timer, Layers,
+  Droplet, Sparkles, Crown, Skull, Orbit, Award, Crosshair,
 } from 'lucide-react';
 import { SHIPS, type ShipId } from '../game/types';
 import type { BoardEntry, SavedSettings, Totals } from '../game/storage';
+import { ACHIEVEMENTS, getUnlockedAchievements } from '../game/achievements';
 import { formatTime } from '../game/utils';
+import { useMemo } from 'react';
+
+const ACH_ICON: Record<string, typeof Zap> = {
+  droplet: Droplet,
+  combo: Sparkles,
+  crown: Crown,
+  skull: Skull,
+  shield: Shield,
+  medal: Medal,
+  nuke: Crosshair,
+  orbit: Orbit,
+  timer: Timer,
+};
 
 interface Props {
   best: number;
@@ -31,6 +46,7 @@ const SHIP_ICON: Record<ShipId, typeof Rocket> = {
 };
 
 export default function MainMenu({ best, board, totals, settings, onPlay, onOpenSettings, onToggleMute, onSelectShip }: Props) {
+  const unlocked = useMemo(() => getUnlockedAchievements(), []);
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10">
       {/* animated bg */}
@@ -170,6 +186,37 @@ export default function MainMenu({ best, board, totals, settings, onPlay, onOpen
             </div>
           </div>
         )}
+
+        {/* achievements */}
+        <div className="glass mt-5 rounded-2xl p-4 text-right">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-amber-200">
+              <Award size={15} />
+              <span className="text-xs font-black">اچیومنت‌ها</span>
+            </div>
+            <span className="font-display text-[11px] font-bold text-slate-400" dir="ltr">
+              {unlocked.size}/{ACHIEVEMENTS.length}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-9">
+            {ACHIEVEMENTS.map((a) => {
+              const Icon = ACH_ICON[a.icon] ?? Zap;
+              const has = unlocked.has(a.id);
+              return (
+                <div
+                  key={a.id}
+                  title={`${a.nameFa} — ${a.descFa}`}
+                  className={`flex flex-col items-center gap-1 rounded-lg px-1 py-2 text-center ${
+                    has ? 'bg-amber-400/10 text-amber-200' : 'bg-white/[0.03] text-slate-600'
+                  }`}
+                >
+                  <Icon size={16} />
+                  <span className="text-[9px] font-bold leading-3">{a.nameFa}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         <div className="glass mt-5 grid grid-cols-1 gap-3 rounded-2xl p-5 text-right sm:grid-cols-3">
           <div className="rounded-xl bg-white/[0.03] p-3">

@@ -39,3 +39,15 @@ export function formatTime(sec: number): string {
 export function formatScore(n: number): string {
   return n.toLocaleString('en-US');
 }
+
+/** In-place swap-remove: drops elements failing `keep` without allocating. */
+export function sweep<T>(arr: T[], keep: (v: T) => boolean): T[] {
+  let w = 0;
+  for (let r = 0; r < arr.length; r++) {
+    if (keep(arr[r])) {
+      arr[w++] = arr[r];
+    }
+  }
+  arr.length = w;
+  return arr;
+}

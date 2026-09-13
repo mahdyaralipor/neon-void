@@ -143,6 +143,7 @@ export default function App() {
             <HUD
               hud={hud}
               muted={settings.muted}
+              showFps={settings.showFps}
               onPause={() => setPhase('paused')}
               onMute={() => updateSettings({ ...settings, muted: !settings.muted })}
               onDash={() => engineRef.current?.tryDash()}

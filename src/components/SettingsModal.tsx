@@ -130,6 +130,39 @@ export default function SettingsModal({ settings, onChange, onClose }: Props) {
           </button>
         </div>
 
+        <div className="mt-2 flex items-center justify-between rounded-xl bg-white/[0.03] px-3 py-2.5">
+          <div>
+            <div className="text-xs font-bold text-slate-200">کیفیت خودکار</div>
+            <div className="text-[10px] text-slate-500">افت FPS → کاهش ذرات و رزولوشن</div>
+          </div>
+          <button
+            onClick={() => onChange({ ...settings, autoQuality: !settings.autoQuality })}
+            className={`relative h-6 w-11 shrink-0 rounded-full transition ${settings.autoQuality ? 'bg-cyan-400' : 'bg-white/15'}`}
+            aria-label="auto quality"
+          >
+            <span
+              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                settings.autoQuality ? 'right-0.5' : 'left-0.5'
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className="mt-2 flex items-center justify-between rounded-xl bg-white/[0.03] px-3 py-2.5">
+          <span className="text-xs font-bold text-slate-200">نمایش FPS</span>
+          <button
+            onClick={() => onChange({ ...settings, showFps: !settings.showFps })}
+            className={`relative h-6 w-11 rounded-full transition ${settings.showFps ? 'bg-cyan-400' : 'bg-white/15'}`}
+            aria-label="show fps"
+          >
+            <span
+              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                settings.showFps ? 'right-0.5' : 'left-0.5'
+              }`}
+            />
+          </button>
+        </div>
+
         <button
           onClick={onClose}
           className="btn-neon mt-5 w-full rounded-2xl bg-gradient-to-l from-cyan-400 to-sky-500 px-5 py-3 text-sm font-black text-slate-950"

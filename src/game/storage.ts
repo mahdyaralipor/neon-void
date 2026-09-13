@@ -100,6 +100,8 @@ export interface SavedSettings {
   ship: ShipId;
   musicVol: number; // 0..1
   sfxVol: number; // 0..1
+  autoQuality: boolean;
+  showFps: boolean;
 }
 
 export function getSettings(): SavedSettings {
@@ -111,6 +113,8 @@ export function getSettings(): SavedSettings {
     ship: 'vanguard',
     musicVol: 0.8,
     sfxVol: 1,
+    autoQuality: true,
+    showFps: false,
   };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
