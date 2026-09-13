@@ -104,8 +104,24 @@ export const UPGRADE_POOL: UpgradeDef[] = [
   },
   {
     id: 'thorns', nameFa: 'هاله خار', nameEn: 'Thorn Halo',
-    descFa: 'تماس دشمن ۱۲ دمیج به خودش می‌زند', descEn: 'contact reflects 12',
+    descFa: 'تماس دشمن ۱۲ دمیج به خودش می‌زند', descEn: '+12 contact reflect',
     tier: 'rare', maxStacks: 3, icon: 'thorns',
+  },
+  // ---- NEW in v3 ----
+  {
+    id: 'nova', nameFa: 'انفجار نووا', nameEn: 'Nova Burst',
+    descFa: 'هر ۸ ثانیه موج انفجاری دور کشتی', descEn: 'radial nova blast',
+    tier: 'epic', maxStacks: 3, icon: 'nova',
+  },
+  {
+    id: 'seeker', nameFa: 'موشک جوینده', nameEn: 'Seeker Missile',
+    descFa: 'هر ۳ ثانیه موشک هدایت‌شونده', descEn: 'homing missile',
+    tier: 'rare', maxStacks: 4, icon: 'seeker',
+  },
+  {
+    id: 'secondwind', nameFa: 'فرصت دوباره', nameEn: 'Second Wind',
+    descFa: 'نجات از مرگ با ۳۰٪ جان (۹۰ ثانیه کول‌داون)', descEn: 'cheat death once',
+    tier: 'epic', maxStacks: 2, icon: 'secondwind',
   },
 ];
 
@@ -133,7 +149,7 @@ export function applyUpgrade(stats: PlayerStats, id: string): void {
       stats.fireRate = Math.min(14, stats.fireRate * 1.1);
       break;
     case 'orbital':
-      stats.orbitals = Math.min(3, stats.orbitals + 1);
+      stats.orbitals = Math.min(4, stats.orbitals + 1);
       stats.orbitalDamage *= 1.12;
       break;
     case 'bladeplus':

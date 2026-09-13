@@ -1,7 +1,7 @@
 import {
   Activity, ArrowRight, Crosshair, Droplet, Flame, Gauge, Heart,
   Magnet, Shield, Split, Star, Swords, Wind, Zap, Rocket,
-  Orbit, Axe, Skull, Sparkles, Siren, Shell,
+  Orbit, Axe, Skull, Sparkles, Siren, Shell, HeartPulse,
 } from 'lucide-react';
 import type { UpgradeDef } from '../game/types';
 
@@ -33,6 +33,9 @@ const ICONS: Record<string, typeof Zap> = {
   combo: Sparkles,
   siren: Siren,
   thorns: Shell,
+  nova: Sparkles,
+  seeker: Rocket,
+  secondwind: HeartPulse,
 };
 
 const TIER_STYLE: Record<string, string> = {

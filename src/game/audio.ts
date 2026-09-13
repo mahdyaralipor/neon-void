@@ -140,6 +140,19 @@ export class SynthAudio {
     this.tone(150, 30, 1.0, 'sawtooth', 0.3 * this.sfxVol);
     this.tone(80, 400, 0.6, 'sine', 0.2 * this.sfxVol, 0.1);
   }
+  nova(): void {
+    this.noise(0.35, 0.2 * this.sfxVol, 1800);
+    this.tone(200, 900, 0.3, 'triangle', 0.16 * this.sfxVol);
+    this.tone(400, 1600, 0.22, 'sine', 0.1 * this.sfxVol, 0.05);
+  }
+  frost(): void {
+    this.tone(1200, 300, 0.5, 'sine', 0.14 * this.sfxVol);
+    this.tone(900, 2400, 0.4, 'triangle', 0.08 * this.sfxVol, 0.08);
+  }
+  secondWind(): void {
+    this.tone(300, 1200, 0.5, 'sawtooth', 0.18 * this.sfxVol);
+    this.tone(150, 600, 0.7, 'triangle', 0.16 * this.sfxVol, 0.12);
+  }
   shieldUp(): void {
     this.tone(300, 900, 0.25, 'triangle', 0.14 * this.sfxVol);
   }

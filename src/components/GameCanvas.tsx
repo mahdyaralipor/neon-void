@@ -1,16 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { GameEngine } from '../game/engine';
-import type { EngineCallbacks, EngineOptions } from '../game/types';
+import type { EngineCallbacks, EngineOptions, MetaLevels } from '../game/types';
 import type { SavedSettings } from '../game/storage';
 
 interface Props {
   settings: SavedSettings;
+  meta: MetaLevels;
   paused: boolean;
   callbacks: EngineCallbacks;
   onEngine: (e: GameEngine | null) => void;
 }
 
-export default function GameCanvas({ settings, paused, callbacks, onEngine }: Props) {
+export default function GameCanvas({ settings, meta, paused, callbacks, onEngine }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const cbRef = useRef(callbacks);
@@ -34,6 +35,7 @@ export default function GameCanvas({ settings, paused, callbacks, onEngine }: Pr
       muted: settings.muted,
       ship: settings.ship,
       autoQuality: settings.autoQuality,
+      meta,
     };
     const engine = new GameEngine(canvas, stable, opts);
     engineRef.current = engine;

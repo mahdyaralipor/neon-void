@@ -1,6 +1,7 @@
 import {
   Heart, Pause, Star, Swords, Timer, Volume2, VolumeX, Wind,
-  Shield, Magnet, Flame, Crown, Gauge, Sparkles,
+  Shield, Magnet, Flame, Crown, Gauge, Sparkles, Snowflake,
+  Rocket, HeartPulse,
 } from 'lucide-react';
 import { MUTATORS, type HudSnapshot, type PowerUpKind } from '../game/types';
 import { formatScore, formatTime } from '../game/utils';
@@ -21,6 +22,7 @@ const POWERUP_META: Record<PowerUpKind, { fa: string; color: string }> = {
   nuke: { fa: 'هسته‌ای', color: 'text-orange-300' },
   overdrive: { fa: 'اور‌درایو', color: 'text-yellow-300' },
   heal: { fa: 'درمان', color: 'text-emerald-300' },
+  frost: { fa: 'یخ', color: 'text-sky-200' },
 };
 
 const POWERUP_ICON: Record<PowerUpKind, typeof Shield> = {
@@ -29,6 +31,7 @@ const POWERUP_ICON: Record<PowerUpKind, typeof Shield> = {
   nuke: Flame,
   overdrive: Flame,
   heal: Heart,
+  frost: Snowflake,
 };
 
 export default function HUD({ hud, muted, showFps, onPause, onMute, onDash }: Props) {
@@ -152,6 +155,31 @@ export default function HUD({ hud, muted, showFps, onPause, onMute, onDash }: Pr
           {hud.orbitals > 0 && (
             <div className="mt-1.5 text-[10px] font-bold text-yellow-300">
               ◈ {hud.orbitals} تیغه مداری فعال
+            </div>
+          )}
+          {/* weapon mods (nova / seeker / second-wind) */}
+          {(hud.mods.nova > 0 || hud.mods.seeker > 0 || hud.mods.secondwind) && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {hud.mods.nova > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-lg bg-white/8 px-2 py-0.5 text-[10px] font-bold text-orange-300">
+                  <Sparkles size={11} /> نووا ×{hud.mods.nova}
+                </span>
+              )}
+              {hud.mods.seeker > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-lg bg-white/8 px-2 py-0.5 text-[10px] font-bold text-orange-300">
+                  <Rocket size={11} /> سیکر ×{hud.mods.seeker}
+                </span>
+              )}
+              {hud.mods.secondwind && (
+                <span
+                  className={`inline-flex items-center gap-1 rounded-lg bg-white/8 px-2 py-0.5 text-[10px] font-bold ${
+                    hud.mods.swCd <= 0 ? 'text-emerald-300' : 'text-slate-500'
+                  }`}
+                >
+                  <HeartPulse size={11} />{' '}
+                  {hud.mods.swCd <= 0 ? 'فرصت دوباره آماده' : `فرصت دوباره ${Math.ceil(hud.mods.swCd)}s`}
+                </span>
+              )}
             </div>
           )}
         </div>

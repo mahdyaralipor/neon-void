@@ -2,9 +2,11 @@ import {
   Play, Settings, Trophy, Volume2, VolumeX, Gamepad2, Zap, Shield,
   Star, Rocket, Ghost, Anchor, Medal, Swords, Timer, Layers,
   Droplet, Sparkles, Crown, Skull, Orbit, Award, Crosshair,
+  FlaskConical, Gem, Hexagon, Snowflake, HeartPulse,
 } from 'lucide-react';
 import { SHIPS, type ShipId } from '../game/types';
 import type { BoardEntry, SavedSettings, Totals } from '../game/storage';
+import type { MetaLevels } from '../game/types';
 import { ACHIEVEMENTS, getUnlockedAchievements } from '../game/achievements';
 import { formatTime } from '../game/utils';
 import { useMemo } from 'react';
@@ -19,6 +21,9 @@ const ACH_ICON: Record<string, typeof Zap> = {
   nuke: Crosshair,
   orbit: Orbit,
   timer: Timer,
+  hexagon: Hexagon,
+  snowflake: Snowflake,
+  heartpulse: HeartPulse,
 };
 
 interface Props {
@@ -26,8 +31,11 @@ interface Props {
   board: BoardEntry[];
   totals: Totals;
   settings: SavedSettings;
+  shards: number;
+  meta: MetaLevels;
   onPlay: () => void;
   onOpenSettings: () => void;
+  onOpenLab: () => void;
   onToggleMute: () => void;
   onSelectShip: (s: ShipId) => void;
 }
@@ -43,10 +51,12 @@ const SHIP_ICON: Record<ShipId, typeof Rocket> = {
   vanguard: Rocket,
   phantom: Ghost,
   titan: Anchor,
+  warden: Shield,
 };
 
-export default function MainMenu({ best, board, totals, settings, onPlay, onOpenSettings, onToggleMute, onSelectShip }: Props) {
+export default function MainMenu({ best, board, totals, settings, shards, meta, onPlay, onOpenSettings, onOpenLab, onToggleMute, onSelectShip }: Props) {
   const unlocked = useMemo(() => getUnlockedAchievements(), []);
+  const metaTotal = meta.dmg + meta.hp + meta.speed + meta.xp;
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10">
       {/* animated bg */}
@@ -58,7 +68,7 @@ export default function MainMenu({ best, board, totals, settings, onPlay, onOpen
       <div className="relative w-full max-w-3xl text-center">
         <div className="anim-rise inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-1 text-xs text-cyan-200">
           <Zap size={14} />
-          نسخه ۲ — الیت‌ها · پاورآپ‌ها · تیغه‌های مداری · ۹ دشمن
+          نسخه ۳ — آزمایشگاه متا · دشمنان جدید · سلاح‌های نووا و سیکر
         </div>
 
         <h1
@@ -99,7 +109,7 @@ export default function MainMenu({ best, board, totals, settings, onPlay, onOpen
           <div className="mb-3 text-center text-xs font-black tracking-widest text-slate-400" dir="ltr">
             ◆ SELECT YOUR SHIP ◆
           </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {SHIPS.map((s) => {
               const Icon = SHIP_ICON[s.id];
               const active = settings.ship === s.id;
@@ -131,6 +141,32 @@ export default function MainMenu({ best, board, totals, settings, onPlay, onOpen
                 </button>
               );
             })}
+          </div>
+        </div>
+
+        {/* Void Lab teaser */}
+        <div className="glass mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl p-4 text-right">
+          <div className="flex items-center gap-3">
+            <span className="rounded-xl bg-cyan-400/10 p-2.5 text-cyan-300">
+              <FlaskConical size={20} />
+            </span>
+            <div>
+              <div className="text-sm font-black text-white">آزمایشگاه خلأ</div>
+              <div className="text-[11px] text-slate-400">
+                ارتقای دائمی با خرده‌های خلأ · {metaTotal} لول فعال
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-300/30 bg-cyan-400/10 px-3 py-1.5 text-sm font-black text-cyan-200">
+              <Gem size={14} /> <span className="font-display" dir="ltr">{shards.toLocaleString('en-US')}</span>
+            </span>
+            <button
+              onClick={onOpenLab}
+              className="btn-neon rounded-xl bg-gradient-to-l from-cyan-400 to-sky-500 px-5 py-2 text-xs font-black text-slate-950"
+            >
+              ورود به آزمایشگاه
+            </button>
           </div>
         </div>
 
@@ -198,7 +234,7 @@ export default function MainMenu({ best, board, totals, settings, onPlay, onOpen
               {unlocked.size}/{ACHIEVEMENTS.length}
             </span>
           </div>
-          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-9">
+          <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6">
             {ACHIEVEMENTS.map((a) => {
               const Icon = ACH_ICON[a.icon] ?? Zap;
               const has = unlocked.has(a.id);
@@ -244,7 +280,7 @@ export default function MainMenu({ best, board, totals, settings, onPlay, onOpen
               <span className="text-xs font-bold">پیشرفت</span>
             </div>
             <p className="mt-2 text-[12px] leading-6 text-slate-300">
-              الیت‌های طلایی = ۵× تجربه — باس هر ۵ موج — ۲۱ ارتقا
+              الیت‌های طلایی = ۵× تجربه — باس هر ۵ موج — ۲۴ ارتقا + آزمایشگاه متا
             </p>
           </div>
         </div>

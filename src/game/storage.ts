@@ -1,9 +1,12 @@
-import type { Difficulty, ShipId } from './types';
+import type { Difficulty, MetaLevels, ShipId } from './types';
+import { META_ZERO, META_MAX_LEVEL } from './types';
 
 const BEST_KEY = 'neon-void-best';
 const BOARD_KEY = 'neon-void-board-v2';
 const TOTALS_KEY = 'neon-void-totals-v2';
 const SETTINGS_KEY = 'neon-void-settings';
+const SHARDS_KEY = 'neon-void-shards-v1';
+const META_KEY = 'neon-void-meta-v1';
 
 export interface BoardEntry {
   score: number;
@@ -132,4 +135,57 @@ export function saveSettings(s: SavedSettings): void {
   } catch {
     /* ignore */
   }
+}
+
+// ---------- Void Lab: shards currency + permanent meta tracks ----------
+
+export function getShards(): number {
+  try {
+    const v = localStorage.getItem(SHARDS_KEY);
+    return v ? Math.max(0, parseInt(v, 10) || 0) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Add (or spend, if negative) shards. Returns the new balance. */
+export function addShards(n: number): number {
+  const next = Math.max(0, getShards() + Math.floor(n));
+  try {
+    localStorage.setItem(SHARDS_KEY, String(next));
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
+export function getMeta(): MetaLevels {
+  try {
+    const raw = localStorage.getItem(META_KEY);
+    if (!raw) return { ...META_ZERO };
+    const p = JSON.parse(raw) as Partial<MetaLevels>;
+    const m: MetaLevels = { ...META_ZERO, ...p };
+    // sanitize
+    (Object.keys(m) as (keyof MetaLevels)[]).forEach((k) => {
+      m[k] = Math.max(0, Math.min(META_MAX_LEVEL, Math.floor(m[k]) || 0));
+    });
+    return m;
+  } catch {
+    return { ...META_ZERO };
+  }
+}
+
+/** Buy one level of a meta track. Returns updated {meta, shards} or null if not affordable/maxed. */
+export function buyMeta(track: keyof MetaLevels): { meta: MetaLevels; shards: number } | null {
+  const meta = getMeta();
+  if (meta[track] >= META_MAX_LEVEL) return null;
+  const cost = 5 * (meta[track] + 1);
+  if (getShards() < cost) return null;
+  meta[track] += 1;
+  try {
+    localStorage.setItem(META_KEY, JSON.stringify(meta));
+  } catch {
+    /* ignore */
+  }
+  return { meta, shards: addShards(-cost) };
 }

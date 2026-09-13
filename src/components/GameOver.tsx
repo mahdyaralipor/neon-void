@@ -1,4 +1,4 @@
-import { Home, RotateCcw, Swords, Timer, Trophy, Layers, Flame, Crown, Medal } from 'lucide-react';
+import { Home, RotateCcw, Swords, Timer, Trophy, Layers, Flame, Crown, Medal, Gem, Zap } from 'lucide-react';
 import type { GameResult, Grade } from '../game/types';
 import type { BoardEntry } from '../game/storage';
 import { formatScore, formatTime } from '../game/utils';
@@ -52,6 +52,8 @@ export default function GameOver({ result, best, board, onRetry, onMenu }: Props
           <Stat icon={<Timer size={14} />} label="زمان" value={formatTime(result.time)} />
           <Stat icon={<Flame size={14} />} label="کمبو" value={`x${result.maxCombo}`} />
           <Stat icon={<Medal size={14} />} label="لول" value={String(result.level)} />
+          <Stat icon={<Gem size={14} />} label="خرده خلأ" value={`+${result.shards}`} />
+          <Stat icon={<Zap size={14} />} label="پاورآپ" value={String(result.powerups)} />
         </div>
 
         {board.length > 0 && (

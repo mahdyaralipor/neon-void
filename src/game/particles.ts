@@ -57,6 +57,7 @@ export class ParticleSystem {
   private waves: Shockwave[] = [];
   private texts: FloatText[] = [];
   private stars: Star[] = [];
+  private cursor = 0;
   scale = 1;
 
   constructor() {
@@ -69,7 +70,7 @@ export class ParticleSystem {
     for (let i = 0; i < 26; i++) {
       this.waves.push({ alive: false, x: 0, y: 0, r: 0, maxR: 100, life: 0, maxLife: 1, color: '#fff', width: 3 });
     }
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 64; i++) {
       this.texts.push({ alive: false, x: 0, y: 0, life: 0, maxLife: 1, text: '', color: '#fff', size: 14 });
     }
     for (let i = 0; i < 140; i++) {
@@ -77,8 +78,13 @@ export class ParticleSystem {
     }
   }
 
+  /** rotating-cursor alloc: O(1) typical case instead of full-pool scan */
   private alloc(): Particle | null {
-    for (const p of this.pool) if (!p.alive) return p;
+    for (let i = 0; i < MAX_P; i++) {
+      this.cursor = (this.cursor + 1) % MAX_P;
+      const p = this.pool[this.cursor];
+      if (!p.alive) return p;
+    }
     return null;
   }
 
@@ -209,18 +215,12 @@ export class ParticleSystem {
 
   drawStars(ctx: CanvasRenderingContext2D, cam: Cam, vw: number, vh: number): void {
     ctx.save();
+    const wSpan = vw + 100;
+    const hSpan = vh + 100;
     for (const s of this.stars) {
-      const sx = ((s.x - cam.x * s.z * 0.5) % 3000 + 3000) % 3000;
-      const sy = ((s.y - cam.y * s.z * 0.5) % 2400 + 2400) % 2400;
-      // map into view (tile trick: offset by cam so stars feel infinite)
-      const dx = (sx - (cam.x * s.z * 0.5) % 3000 + 3000) % 3000;
-      void dx;
-      const px = (s.x - cam.x * (0.25 + s.z * 0.35)) % (vw + 100);
-      const py = (s.y - cam.y * (0.25 + s.z * 0.35)) % (vh + 100);
-      const x = ((px + vw + 100) % (vw + 100)) - 50;
-      const y = ((py + vh + 100) % (vh + 100)) - 50;
-      void sx;
-      void sy;
+      const drift = 0.25 + s.z * 0.35;
+      const x = (((s.x - cam.x * drift) % wSpan) + wSpan) % wSpan - 50;
+      const y = (((s.y - cam.y * drift) % hSpan) + hSpan) % hSpan - 50;
       ctx.globalAlpha = 0.25 + s.z * 0.55;
       ctx.fillStyle = s.z > 0.75 ? '#9df3ff' : '#ffffff';
       const sz = s.z * 2.1;

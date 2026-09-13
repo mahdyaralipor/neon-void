@@ -18,6 +18,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'nuke20', nameFa: 'هسته‌ای', nameEn: 'NUKEM', descFa: 'یک نیوک با ۲۰+ کیل', icon: 'nuke' },
   { id: 'orbital3', nameFa: 'ارباب تیغه', nameEn: 'BLADE LORD', descFa: '۳ تیغه مداری همزمان', icon: 'orbit' },
   { id: 'survivor5', nameFa: '۵ دقیقه جهنم', nameEn: '5 MINUTES', descFa: '۵ دقیقه بقا در یک ران', icon: 'timer' },
+  { id: 'hive_cleanser', nameFa: 'کندوکُش', nameEn: 'HIVE CLEANSER', descFa: 'نابودی ۳ کندو در یک ران', icon: 'hexagon' },
+  { id: 'frost_king', nameFa: 'سلطان یخ', nameEn: 'FROST KING', descFa: 'منجمد کردن ۲۵+ دشمن همزمان', icon: 'snowflake' },
+  { id: 'second_wind', nameFa: 'فرصت دوباره', nameEn: 'SECOND WIND', descFa: 'نجات از مرگ حتمی', icon: 'heartpulse' },
 ];
 
 const KEY = 'neon-void-achievements-v1';

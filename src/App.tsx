@@ -6,10 +6,12 @@ import UpgradeModal from './components/UpgradeModal';
 import GameOver from './components/GameOver';
 import PauseMenu from './components/PauseMenu';
 import SettingsModal from './components/SettingsModal';
+import LabModal from './components/LabModal';
 import type { GameEngine } from './game/engine';
-import type { GameResult, HudSnapshot, UpgradeDef, ShipId } from './game/types';
+import type { GameResult, HudSnapshot, UpgradeDef, ShipId, MetaLevels } from './game/types';
 import {
   getBest, getBoard, getSettings, getTotals, saveSettings,
+  getMeta, getShards, buyMeta,
   type BoardEntry, type SavedSettings, type Totals,
 } from './game/storage';
 
@@ -26,7 +28,10 @@ export default function App() {
   const [board, setBoard] = useState<BoardEntry[]>(() => getBoard());
   const [totals, setTotals] = useState<Totals>(() => getTotals());
   const [settings, setSettings] = useState<SavedSettings>(() => getSettings());
+  const [meta, setMeta] = useState<MetaLevels>(() => getMeta());
+  const [shards, setShards] = useState<number>(() => getShards());
   const [showSettings, setShowSettings] = useState(false);
+  const [showLab, setShowLab] = useState(false);
   const [runId, setRunId] = useState(0);
   const engineRef = useRef<GameEngine | null>(null);
   const phaseRef = useRef(phase);
@@ -37,6 +42,19 @@ export default function App() {
   const updateSettings = useCallback((s: SavedSettings) => {
     setSettings(s);
     saveSettings(s);
+  }, []);
+
+  const buyTrack = useCallback((track: keyof MetaLevels) => {
+    const res = buyMeta(track);
+    if (res) {
+      setMeta(res.meta);
+      setShards(res.shards);
+    }
+  }, []);
+
+  const refreshWallet = useCallback(() => {
+    setMeta(getMeta());
+    setShards(getShards());
   }, []);
 
   const startGame = useCallback(() => {
@@ -57,6 +75,8 @@ export default function App() {
     setBest(getBest());
     setBoard(getBoard());
     setTotals(getTotals());
+    setMeta(getMeta());
+    setShards(getShards());
   }, []);
 
   // engine callbacks (stable wrapper via ref in GameCanvas, so plain callbacks fine)
@@ -70,6 +90,7 @@ export default function App() {
     setBest(getBest());
     setBoard(getBoard());
     setTotals(getTotals());
+    setShards(getShards());
     setPhase('gameover');
   }, []);
   const onWave = useCallback(() => {
@@ -112,8 +133,11 @@ export default function App() {
             board={board}
             totals={totals}
             settings={settings}
+            shards={shards}
+            meta={meta}
             onPlay={startGame}
             onOpenSettings={() => setShowSettings(true)}
+            onOpenLab={() => setShowLab(true)}
             onToggleMute={() => updateSettings({ ...settings, muted: !settings.muted })}
             onSelectShip={(s: ShipId) => updateSettings({ ...settings, ship: s })}
           />
@@ -124,6 +148,17 @@ export default function App() {
               onClose={() => setShowSettings(false)}
             />
           )}
+          {showLab && (
+            <LabModal
+              meta={meta}
+              shards={shards}
+              onBuy={buyTrack}
+              onClose={() => {
+                setShowLab(false);
+                refreshWallet();
+              }}
+            />
+          )}
         </div>
       )}
 
@@ -132,6 +167,7 @@ export default function App() {
           <GameCanvas
             key={runId}
             settings={settings}
+            meta={meta}
             paused={pausedForEngine}
             callbacks={{ onHud, onLevelUp, onGameOver, onWave, onPauseKey }}
             onEngine={(e) => {
