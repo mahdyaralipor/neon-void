@@ -14,6 +14,12 @@ const DIFFS = [
   { id: 'insane', fa: 'جهنمی', en: 'void-touched', desc: 'فقط برای افسانه‌ها' },
 ] as const;
 
+const SPEEDS = [
+  { id: 0.9, fa: 'آرام', en: '0.9x', desc: 'فرصت بیشتر برای واکنش' },
+  { id: 1, fa: 'استاندارد', en: '1x', desc: 'ریتم طراحی‌شده بازی' },
+  { id: 1.25, fa: 'توربو', en: '1.25x', desc: '۲۵٪ تندتر، امتیاز زمانی بیشتر' },
+] as const;
+
 export default function SettingsModal({ settings, onChange, onClose }: Props) {
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
@@ -42,6 +48,27 @@ export default function SettingsModal({ settings, onChange, onClose }: Props) {
                 {d.en}
               </div>
               <div className="mt-1 text-[11px] text-slate-400">{d.desc}</div>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-4 text-xs font-bold text-slate-300">سرعت بازی</div>
+        <div className="mt-2 grid grid-cols-3 gap-2">
+          {SPEEDS.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => onChange({ ...settings, gameSpeed: s.id })}
+              className={`rounded-xl border p-3 text-center transition ${
+                settings.gameSpeed === s.id
+                  ? 'border-amber-300/60 bg-amber-400/10'
+                  : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06]'
+              }`}
+            >
+              <div className="text-sm font-black text-white">{s.fa}</div>
+              <div className="font-display text-[10px] tracking-wider text-slate-500" dir="ltr">
+                {s.en}
+              </div>
+              <div className="mt-1 text-[10px] leading-4 text-slate-400">{s.desc}</div>
             </button>
           ))}
         </div>

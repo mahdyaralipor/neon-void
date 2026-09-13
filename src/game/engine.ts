@@ -406,7 +406,7 @@ export class GameEngine {
     this.py = WORLD_H / 2;
     this.pvx = 0; this.pvy = 0;
     this.hp = this.stats.maxHp;
-    this.fireCd = 0.3;
+    this.fireCd = 0.1;
     this.dashCd = 0; this.dashT = 0; this.invuln = 0;
     this.time = 0; this.kills = 0; this.elites = 0; this.score = 0;
     this.level = 1; this.xp = 0; this.xpNext = 30;
@@ -415,7 +415,7 @@ export class GameEngine {
     this.waveKills = 0;
     this.waveQuota = this.quotaFor(1);
     this.intermission = 0;
-    this.spawnT = 0.5;
+    this.spawnT = 0.2;
     this.pendingLevels = 0;
     this.taken.clear();
     this.boss = null;
@@ -710,6 +710,10 @@ export class GameEngine {
     }
   }
 
+  setGameSpeed(s: number): void {
+    this.opts.speed = s === 0.9 || s === 1.25 ? s : 1;
+  }
+
   private applyQuality(): void {
     // particle scale steps: 1x / 0.6x / 0.35x of the user's base setting
     const mult = this.quality === 0 ? 1 : this.quality === 1 ? 0.6 : 0.35;
@@ -747,6 +751,9 @@ export class GameEngine {
       this.slowmoT -= raw;
       dt *= 0.3;
     }
+    // turbo pace: whole simulation runs at the chosen game speed
+    // (player + enemies scale together, so relative balance is preserved)
+    dt *= this.opts.speed || 1;
     this.update(dt);
     this.render();
     this.hudAcc += raw;
@@ -874,7 +881,7 @@ export class GameEngine {
       this.updateEnemies(dt);
       this.fx.update(dt);
       this.updateCamera(dt);
-      if (this.deathT > 1.5 && !this.gameOverSent) {
+      if (this.deathT > 1.15 && !this.gameOverSent) {
         this.gameOverSent = true;
         const upgrades = [...this.taken.keys()];
         const score = Math.floor(this.score);
@@ -1000,7 +1007,7 @@ export class GameEngine {
     const berserk = (this.taken.get('emergency') ?? 0) > 0 && this.hp < this.stats.maxHp * 0.3;
     if (this.dashT > 0) {
       this.dashT -= dt;
-      const power = 950;
+      const power = 1000;
       this.pvx = this.dashDx * power;
       this.pvy = this.dashDy * power;
       this.fx.trail(this.px, this.py, '#00f0ff');
@@ -1123,10 +1130,10 @@ export class GameEngine {
     const aliveWeight = this.enemies.length;
     const cap = Math.min(130, 14 + this.wave * 5);
     if (this.spawnT <= 0 && aliveWeight < cap && this.waveKills < this.waveQuota) {
-      let interval = Math.max(0.16, (rand(0.5, 1.1) - this.wave * 0.045) * d.interval);
+      let interval = Math.max(0.12, (rand(0.45, 1.0) - this.wave * 0.05) * d.interval);
       if (this.mutator === 'swarm') interval *= 0.55;
       this.spawnT = interval;
-      const batch = this.wave >= 7 ? rand(1, 10) < 3 ? 2 : 1 : 1;
+      const batch = this.wave >= 5 ? (Math.random() < 0.35 ? 2 : 1) : 1;
       for (let i = 0; i < batch; i++) this.spawnEnemy();
     }
     if (this.waveKills >= this.waveQuota && this.enemies.length === 0 && this.deathT < 0) {
@@ -1136,7 +1143,7 @@ export class GameEngine {
       this.setAnnounce(`موج ${this.wave} پاکسازی شد! +${100 * this.wave}`, 2, 1);
       this.fx.shockwave(this.px, this.py, '#ffd319', 200, 0.6, 5);
       this.audio.levelup();
-      this.intermission = 3.2;
+      this.intermission = 2.0;
       this.emitHud();
     }
   }
@@ -1222,63 +1229,63 @@ export class GameEngine {
     switch (kind) {
       case 'chaser':
         base.hp = base.maxHp = 30 * wScale * d.hp;
-        base.speed = 135 * d.speed;
+        base.speed = 148 * d.speed;
         base.dmg = 12 * d.dmg;
         base.xp = 6; base.score = 25; base.r = 16;
         break;
       case 'weaver':
         base.hp = base.maxHp = 22 * wScale * d.hp;
-        base.speed = 175 * d.speed;
+        base.speed = 190 * d.speed;
         base.dmg = 10 * d.dmg;
         base.xp = 7; base.score = 35; base.r = 14;
         break;
       case 'dasher':
         base.hp = base.maxHp = 40 * wScale * d.hp;
-        base.speed = 120 * d.speed;
+        base.speed = 132 * d.speed;
         base.dmg = 16 * d.dmg;
         base.xp = 10; base.score = 50; base.r = 15;
         break;
       case 'shooter':
         base.hp = base.maxHp = 34 * wScale * d.hp;
-        base.speed = 105 * d.speed;
+        base.speed = 112 * d.speed;
         base.dmg = 10 * d.dmg;
         base.xp = 11; base.score = 60; base.r = 16;
         break;
       case 'splitter':
         base.hp = base.maxHp = 70 * wScale * d.hp;
-        base.speed = 85 * d.speed;
+        base.speed = 92 * d.speed;
         base.dmg = 14 * d.dmg;
         base.xp = 8; base.score = 55; base.r = 22;
         break;
       case 'mini':
         base.hp = base.maxHp = 12 * wScale * d.hp;
-        base.speed = 215 * d.speed;
+        base.speed = 225 * d.speed;
         base.dmg = 7 * d.dmg;
         base.xp = 3; base.score = 12; base.r = 9;
         break;
       case 'sniper':
         base.hp = base.maxHp = 46 * wScale * d.hp;
-        base.speed = 95 * d.speed;
+        base.speed = 102 * d.speed;
         base.dmg = 18 * d.dmg;
         base.xp = 14; base.score = 80; base.r = 15;
         base.fireCd = rand(1.2, 2);
         break;
       case 'tank':
         base.hp = base.maxHp = 150 * wScale * d.hp;
-        base.speed = 62 * d.speed;
+        base.speed = 68 * d.speed;
         base.dmg = 20 * d.dmg;
         base.xp = 18; base.score = 110; base.r = 26;
         break;
       case 'lancer':
         base.hp = base.maxHp = 34 * wScale * d.hp;
-        base.speed = 200 * d.speed;
+        base.speed = 215 * d.speed;
         base.dmg = 14 * d.dmg;
         base.xp = 12; base.score = 65; base.r = 14;
         base.stateT = rand(0.5, 1.2);
         break;
       case 'hive':
         base.hp = base.maxHp = 130 * wScale * d.hp;
-        base.speed = 42 * d.speed;
+        base.speed = 48 * d.speed;
         base.dmg = 16 * d.dmg;
         base.xp = 30; base.score = 150; base.r = 30;
         base.fireCd = 2.5; // doubles as mini-spawn timer
@@ -1286,7 +1293,7 @@ export class GameEngine {
       case 'boss': {
         const mult = 1 + (this.wave / 5 - 1) * 0.9;
         base.hp = base.maxHp = 950 * mult * d.hp;
-        base.speed = 92 * d.speed;
+        base.speed = 98 * d.speed;
         base.dmg = 24 * d.dmg;
         base.xp = 120; base.score = 1500; base.r = 52;
         break;
@@ -1346,7 +1353,7 @@ export class GameEngine {
     this.trauma = Math.min(1, this.trauma + 0.7);
     this.fx.shockwave(p.x, p.y, '#ff2244', 320, 0.8, 7);
     this.fx.text(p.x, p.y - 60, 'BOSS', '#ff2244', 30);
-    this.slowmoT = 0.7;
+    this.slowmoT = 0.5;
   }
 
   /** pooled enemy bullet spawn (no allocation in hot path) */
@@ -1458,8 +1465,8 @@ export class GameEngine {
             if (e.stateT <= 0) {
               e.state = 2;
               e.stateT = 0.42;
-              e.vx = e.lockDx * 640;
-              e.vy = e.lockDy * 640;
+              e.vx = e.lockDx * 700;
+              e.vy = e.lockDy * 700;
               this.fx.trail(e.x, e.y, '#ffcf1c');
             }
           } else if (e.state === 2) {
@@ -1495,8 +1502,8 @@ export class GameEngine {
             if (e.stateT <= 0) {
               e.state = 2;
               e.stateT = 0.5;
-              e.vx = e.lockDx * 780;
-              e.vy = e.lockDy * 780;
+              e.vx = e.lockDx * 840;
+              e.vy = e.lockDy * 840;
               this.fx.trail(e.x, e.y, '#2dd4bf');
               this.audio.dash();
             }
@@ -1546,7 +1553,7 @@ export class GameEngine {
           if (e.fireCd <= 0 && dist < 640) {
             e.fireCd = rand(1.7, 2.6);
             const a = angleTo(e.x, e.y, px, py);
-            const sp = 300 + this.wave * 8;
+            const sp = 330 + this.wave * 8;
             this.fireEnemyBullet(e.x, e.y, Math.cos(a) * sp, Math.sin(a) * sp, 6, e.dmg, 3.2);
             this.audio.enemyShoot();
             this.fx.muzzle(e.x, e.y, a, '#b14bff');
@@ -1573,7 +1580,7 @@ export class GameEngine {
             if (e.stateT <= 0) {
               e.state = 0;
               e.fireCd = rand(2.2, 3.2);
-              const sp = 520 + this.wave * 10;
+              const sp = 570 + this.wave * 10;
               this.fireEnemyBullet(e.x, e.y, e.lockDx * sp, e.lockDy * sp, 5, e.dmg, 2.6);
               this.audio.sniperShot();
               this.fx.muzzle(e.x, e.y, Math.atan2(e.lockDy, e.lockDx), '#ff5df2');
@@ -1611,7 +1618,7 @@ export class GameEngine {
             const off = Math.random() * TAU;
             for (let i = 0; i < n; i++) {
               const a = off + (i / n) * TAU;
-              this.fireEnemyBullet(e.x, e.y, Math.cos(a) * 240, Math.sin(a) * 240, 7, e.dmg * 0.7, 4);
+              this.fireEnemyBullet(e.x, e.y, Math.cos(a) * 260, Math.sin(a) * 260, 7, e.dmg * 0.7, 4);
             }
             this.audio.enemyShoot();
             this.fx.shockwave(e.x, e.y, '#ff2244', 160, 0.4, 4);
@@ -1625,7 +1632,7 @@ export class GameEngine {
               for (let k = 0; k < 2; k++) {
                 const a = e.spiralA + k * Math.PI;
                 this.fireEnemyBullet(
-                  e.x, e.y, Math.cos(a) * 200, Math.sin(a) * 200,
+                  e.x, e.y, Math.cos(a) * 220, Math.sin(a) * 220,
                   6, e.dmg * 0.55, 4.5,
                 );
               }
@@ -1651,8 +1658,8 @@ export class GameEngine {
             e.stateT = enraged ? 4 : 6;
             e.state = e.state === 0 ? 1 : 0;
             if (e.state === 1) {
-              e.vx = Math.cos(ang) * 520;
-              e.vy = Math.sin(ang) * 520;
+              e.vx = Math.cos(ang) * 560;
+              e.vy = Math.sin(ang) * 560;
               this.trauma = Math.min(1, this.trauma + 0.35);
             } else {
               // spawn minis
@@ -1797,7 +1804,7 @@ export class GameEngine {
       this.fx.text(e.x, e.y - e.r, String(Math.round(dmg)), 'rgba(226,232,255,0.85)', 11);
     }
     if (e.hp <= 0) {
-      this.hitstopT = Math.max(this.hitstopT, e.kind === 'boss' ? 0.14 : e.elite ? 0.06 : 0.02);
+      this.hitstopT = Math.max(this.hitstopT, e.kind === 'boss' ? 0.1 : e.elite ? 0.06 : 0.02);
     }
   }
 
@@ -1966,7 +1973,7 @@ export class GameEngine {
     this.audio.nuke();
     this.trauma = 1;
     this.gridPulse = 1;
-    this.slowmoT = Math.max(this.slowmoT, 0.6);
+    this.slowmoT = Math.max(this.slowmoT, 0.45);
     this.fx.shockwave(this.px, this.py, '#ff5d2a', 700, 0.8, 10);
     this.fx.explosion(this.px, this.py, '#ffd319', 60, 600);
     const dead = [...this.enemies];
@@ -2100,7 +2107,7 @@ export class GameEngine {
       }
       this.hp = 0;
       this.deathT = 0;
-      this.slowmoT = 1.2;
+      this.slowmoT = 1.0;
       this.trauma = 1;
       this.fx.explosion(this.px, this.py, '#00f0ff', 80, 560);
       this.fx.explosion(this.px, this.py, '#ff2d78', 60, 420);
@@ -2114,7 +2121,7 @@ export class GameEngine {
     while (this.xp >= this.xpNext) {
       this.xp -= this.xpNext;
       this.level += 1;
-      this.xpNext = Math.floor(this.xpNext * 1.27 + 18);
+      this.xpNext = Math.floor(this.xpNext * 1.22 + 16);
       this.pendingLevels += 1;
     }
     if (this.pendingLevels > 0 && !this.upgradeLock) {
@@ -2147,7 +2154,7 @@ export class GameEngine {
         g.vx += ((this.px - g.x) / d) * pull * dt * 4;
         g.vy += ((this.py - g.y) / d) * pull * dt * 4;
       }
-      if (d2 < 26 * 26) {
+      if (d2 < 30 * 30) {
         g.t = -999; // collected marker
         this.addXp(g.val);
         this.score += 5;

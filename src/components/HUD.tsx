@@ -11,6 +11,7 @@ interface Props {
   hud: HudSnapshot;
   muted: boolean;
   showFps: boolean;
+  gameSpeed: number;
   onPause: () => void;
   onMute: () => void;
   onDash: () => void;
@@ -34,7 +35,7 @@ const POWERUP_ICON: Record<PowerUpKind, typeof Shield> = {
   frost: Snowflake,
 };
 
-export default function HUD({ hud, muted, showFps, onPause, onMute, onDash }: Props) {
+export default function HUD({ hud, muted, showFps, gameSpeed, onPause, onMute, onDash }: Props) {
   const hpFrac = Math.max(0, hud.hp / Math.max(1, hud.maxHp));
   const xpFrac = Math.min(1, hud.xp / Math.max(1, hud.xpNext));
   const dashFrac = 1 - hud.dashCd / Math.max(0.01, hud.dashMax);
@@ -57,9 +58,21 @@ export default function HUD({ hud, muted, showFps, onPause, onMute, onDash }: Pr
         </div>
       )}
 
-      {/* mutator + fps badges */}
-      {(mut || showFps) && (
+      {/* mutator + fps + speed badges */}
+      {(mut || showFps || gameSpeed !== 1) && (
         <div className="mx-auto mt-1.5 flex w-fit items-center gap-2">
+          {gameSpeed !== 1 && (
+            <div
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-0.5 font-display text-[11px] font-bold backdrop-blur-sm ${
+                gameSpeed > 1
+                  ? 'border-amber-300/40 bg-amber-400/10 text-amber-200'
+                  : 'border-sky-300/30 bg-sky-400/10 text-sky-200'
+              }`}
+              dir="ltr"
+            >
+              {gameSpeed > 1 ? '⚡ TURBO' : '🐢 CALM'} · ×{gameSpeed}
+            </div>
+          )}
           {mut && (
             <div className="inline-flex items-center gap-1.5 rounded-full border border-violet-400/40 bg-violet-500/15 px-3 py-0.5 text-[11px] font-black text-violet-200 backdrop-blur-sm" dir="ltr">
               <Sparkles size={12} /> {mut.nameEn} · ×{mut.scoreMult}

@@ -105,6 +105,7 @@ export interface SavedSettings {
   sfxVol: number; // 0..1
   autoQuality: boolean;
   showFps: boolean;
+  gameSpeed: number; // 0.9 calm | 1 standard | 1.25 turbo
 }
 
 export function getSettings(): SavedSettings {
@@ -118,12 +119,17 @@ export function getSettings(): SavedSettings {
     sfxVol: 1,
     autoQuality: true,
     showFps: false,
+    gameSpeed: 1,
   };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return fallback;
     const p = JSON.parse(raw) as Partial<SavedSettings>;
-    return { ...fallback, ...p };
+    const s = { ...fallback, ...p };
+    if (s.gameSpeed !== 0.9 && s.gameSpeed !== 1 && s.gameSpeed !== 1.25) {
+      s.gameSpeed = 1;
+    }
+    return s;
   } catch {
     return fallback;
   }

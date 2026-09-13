@@ -125,18 +125,18 @@ export interface PlayerStats {
 export const BASE_STATS: PlayerStats = {
   damage: 14,
   fireRate: 4.2,
-  bulletSpeed: 720,
+  bulletSpeed: 780,
   pierce: 0,
   multishot: 1,
   spread: 0.11,
   critChance: 0.08,
   critMult: 2.1,
-  moveSpeed: 335,
+  moveSpeed: 360,
   maxHp: 100,
   regen: 1.1,
-  magnet: 110,
+  magnet: 125,
   armor: 0,
-  dashCooldownMax: 2.4,
+  dashCooldownMax: 2.0,
   xpGainMult: 1,
   lifesteal: 0,
   orbitals: 0,
@@ -187,6 +187,8 @@ export interface EngineOptions {
   ship: ShipId;
   autoQuality: boolean;
   meta: MetaLevels;
+  /** global game-speed multiplier (0.9 calm / 1 standard / 1.25 turbo) */
+  speed: number;
 }
 
 export interface MinimapDot {
