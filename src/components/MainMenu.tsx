@@ -3,13 +3,16 @@ import {
   Star, Rocket, Ghost, Anchor, Medal, Swords, Timer, Layers,
   Droplet, Sparkles, Crown, Skull, Orbit, Award, Crosshair,
   FlaskConical, Gem, Hexagon, Snowflake, HeartPulse, BookOpen,
-  History, Infinity as InfinityIcon, Zap,
+  History, Infinity as InfinityIcon,
 } from 'lucide-react';
 import { SHIPS, type ShipDef, type ShipId } from '../game/types';
 import { getRuns, type BoardEntry, type SavedSettings, type Totals } from '../game/storage';
 import type { MetaLevels } from '../game/types';
 import { ACHIEVEMENTS, getUnlockedAchievements } from '../game/achievements';
-import { ENEMY_COLOR, ENEMY_FA, ENEMY_LORE } from '../game/enemies';
+import { ENEMY_COLOR, ENEMY_FA, ENEMY_LORE, BOSS_KINDS } from '../game/enemies';
+import { UPGRADE_POOL } from '../game/upgrades';
+import { MUTATORS } from '../game/types';
+import pkg from '../../package.json';
 import type { EnemyKind } from '../game/types';
 import { formatTime } from '../game/utils';
 import MenuBackdrop from './MenuBackdrop';
@@ -101,7 +104,7 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-75" />
             <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-300" />
           </span>
-          نسخه ۷ · MAGNETIC · بکش، بترکون، برگرد ♾️
+          نسخه {pkg.version} · بکش، بترکون، برگرد ♾️
         </div>
 
         <div className="relative mx-auto mt-5 w-fit">
@@ -358,9 +361,9 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
 
         <div className="mt-4 grid grid-cols-1 gap-2.5 text-right sm:grid-cols-3">
           {[
-            { icon: Gamepad2, tint: 'text-cyan-200 bg-cyan-300/10', title: 'حرکت و شلیک', body: 'WASD حرکت · موس aim · شلیک خودکار · هر لول یک ری‌رول · زنجیره و شیرجه جدید!' },
-            { icon: Zap, tint: 'text-cyan-200 bg-cyan-300/10', title: 'تازه‌های v6', body: 'استینگر ۳تیره · طوفان خلأ · صاعقه زنجیره‌ای · شیرجه فاز · حالت بی‌پایان ♾️' },
-            { icon: Star, tint: 'text-amber-200 bg-amber-300/10', title: 'پیشرفت', body: 'الیت ۵× تجربه · باس هر ۵ موج · هر اچیومنت ۳ خرده · فتح موج ۲۰ بعد بی‌پایان' },
+            { icon: Gamepad2, tint: 'text-cyan-200 bg-cyan-300/10', title: 'حرکت و شلیک', body: 'WASD حرکت · موس aim · شلیک خودکار · هر لول یک ری‌رول' },
+            { icon: Skull, tint: 'text-rose-200 bg-rose-400/10', title: 'دشمن و باس', body: `${codexKinds.length} دشمن · ${BOSS_KINDS.length} باس · ${Object.keys(MUTATORS).length} موتاتور — هر ۵ موج یه غول` },
+            { icon: Star, tint: 'text-amber-200 bg-amber-300/10', title: 'پیشرفت', body: `${UPGRADE_POOL.length} ارتقا · ${ACHIEVEMENTS.length} اچیومنت · آزمایشگاه دائمی + بی‌پایان ♾️` },
           ].map((c) => (
             <div key={c.title} className="glass rounded-2xl p-4">
               <div className="flex items-center gap-2">
