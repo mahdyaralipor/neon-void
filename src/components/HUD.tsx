@@ -1,6 +1,6 @@
 import {
   Heart, Pause, Star, Timer, Volume2, VolumeX, Wind, Zap, Settings,
-  Shield, Magnet, Flame, Crown, Gauge, Sparkles, Snowflake,
+  Shield, Magnet, Flame, Crown, Gauge, Sparkles, Snowflake, Gem, Ghost,
   Rocket, HeartPulse,
 } from 'lucide-react';
 import { MUTATORS, type HudSnapshot, type PowerUpKind } from '../game/types';
@@ -25,6 +25,8 @@ const POWERUP_META: Record<PowerUpKind, { fa: string; dot: string }> = {
   overdrive: { fa: 'اور‌درایو', dot: 'bg-amber-200' },
   heal: { fa: 'درمان', dot: 'bg-emerald-300' },
   frost: { fa: 'یخ', dot: 'bg-sky-200' },
+  greed: { fa: 'طمع', dot: 'bg-fuchsia-300' },
+  phase: { fa: 'فاز', dot: 'bg-slate-200' },
 };
 
 const POWERUP_ICON: Record<PowerUpKind, typeof Shield> = {
@@ -34,6 +36,8 @@ const POWERUP_ICON: Record<PowerUpKind, typeof Shield> = {
   overdrive: Flame,
   heal: Heart,
   frost: Snowflake,
+  greed: Gem,
+  phase: Ghost,
 };
 
 export default function HUD({ hud, muted, showFps, gameSpeed, onPause, onMute, onDash, onOpenSettings }: Props) {

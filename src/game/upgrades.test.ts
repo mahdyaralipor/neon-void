@@ -54,6 +54,22 @@ describe('applyUpgrade', () => {
     applyUpgrade(s, 'headhunter');
     expect(s.critMult).toBeCloseTo(BASE_STATS.critMult + 0.4, 6);
   });
+
+  it('sniper trades rate for heavy rounds', () => {
+    const s = { ...BASE_STATS };
+    applyUpgrade(s, 'sniper');
+    expect(s.damage).toBeCloseTo(BASE_STATS.damage * 1.35, 6);
+    expect(s.bulletSpeed).toBeCloseTo(BASE_STATS.bulletSpeed * 1.3, 6);
+    expect(s.fireRate).toBeCloseTo(BASE_STATS.fireRate * 0.9, 6);
+  });
+
+  it('fortress tanks up and slows down', () => {
+    const s = { ...BASE_STATS };
+    applyUpgrade(s, 'fortress');
+    expect(s.maxHp).toBe(BASE_STATS.maxHp + 40);
+    expect(s.armor).toBe(BASE_STATS.armor + 2);
+    expect(s.moveSpeed).toBeCloseTo(BASE_STATS.moveSpeed * 0.92, 6);
+  });
 });
 
 describe('dynamic multipliers', () => {
@@ -101,5 +117,12 @@ describe('rollUpgrades', () => {
     expect(statsForShip('titan').armor).toBeGreaterThanOrEqual(3);
     expect(statsForShip('warden').orbitals).toBe(1);
     expect(statsForShip('phantom').critChance).toBeGreaterThan(BASE_STATS.critChance);
+  });
+
+  it('nomad farms faster and hits softer', () => {
+    const n = statsForShip('nomad');
+    expect(n.magnet).toBeGreaterThan(BASE_STATS.magnet);
+    expect(n.xpGainMult).toBeGreaterThan(1);
+    expect(n.damage).toBeLessThan(BASE_STATS.damage);
   });
 });

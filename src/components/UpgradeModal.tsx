@@ -44,6 +44,8 @@ const ICONS: Record<string, typeof Zap> = {
   chain: Zap,
   headhunter: Crosshair,
   phasedive: Wind,
+  sniper: Crosshair,
+  fortress: Shield,
 };
 
 const TIER_CARD: Record<string, string> = {

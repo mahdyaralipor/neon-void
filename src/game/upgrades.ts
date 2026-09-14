@@ -139,6 +139,17 @@ export const UPGRADE_POOL: UpgradeDef[] = [
     descFa: 'دش به دشمنان ۳× دمیج می‌زند', descEn: 'dash deals damage',
     tier: 'rare', maxStacks: 3, icon: 'phasedive',
   },
+  // ---- NEW in v7.3 ----
+  {
+    id: 'sniper', nameFa: 'گلوله تک‌تیرانداز', nameEn: 'Sniper Rounds',
+    descFa: '+۳۵٪ دمیج و +۳۰٪ سرعت گلوله، -۱۰٪ سرعت شلیک', descEn: 'heavy slow rounds',
+    tier: 'rare', maxStacks: 4, icon: 'sniper',
+  },
+  {
+    id: 'fortress', nameFa: 'دژ متحرک', nameEn: 'Fortress',
+    descFa: '+۴۰ جان و +۲ آرمور، -۸٪ سرعت', descEn: 'tank up, slow down',
+    tier: 'rare', maxStacks: 4, icon: 'fortress',
+  },
 ];
 
 export function applyUpgrade(stats: PlayerStats, id: string): void {
@@ -179,6 +190,8 @@ export function applyUpgrade(stats: PlayerStats, id: string): void {
     case 'chain': stats.fireRate = Math.min(14, stats.fireRate * 1.04); break;
     case 'headhunter': stats.critMult += 0.4; stats.critChance = Math.min(0.8, stats.critChance + 0.04); break;
     case 'phasedive': stats.dashCooldownMax = Math.max(0.6, stats.dashCooldownMax * 0.92); stats.moveSpeed *= 1.03; break;
+    case 'sniper': stats.damage *= 1.35; stats.bulletSpeed *= 1.3; stats.fireRate *= 0.9; break;
+    case 'fortress': stats.maxHp += 40; stats.armor += 2; stats.moveSpeed *= 0.92; break;
   }
 }
 

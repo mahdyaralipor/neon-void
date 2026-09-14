@@ -27,6 +27,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'stormrider', nameFa: 'سوار طوفان', nameEn: 'STORM RIDER', descFa: 'بقا در موتاتور طوفان خلأ', icon: 'snowflake' },
   { id: 'bomber10', nameFa: 'خنثی‌کننده', nameEn: 'BOMB SQUAD', descFa: 'نابودی ۱۰ بمب‌افکن', icon: 'nuke' },
   { id: 'boss_trio', nameFa: 'سه‌تاج', nameEn: 'TRIPLE CROWN', descFa: 'شکست هر سه باس', icon: 'crown' },
+  { id: 'greed_is_good', nameFa: 'طمع خوب است', nameEn: 'GREED IS GOOD', descFa: 'اولین طمع طلایی', icon: 'gem' },
+  { id: 'untouchable', nameFa: 'دست‌نیافتنی', nameEn: 'UNTOUCHABLE', descFa: 'اولین فاز شبح', icon: 'ghost' },
 ];
 
 const KEY = 'neon-void-achievements-v1';

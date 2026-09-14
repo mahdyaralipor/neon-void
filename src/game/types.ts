@@ -3,7 +3,7 @@ export type Difficulty = 'easy' | 'normal' | 'hard' | 'insane';
 /** Clearing this wave wins the run (endless continues past it). */
 export const WIN_WAVE = 20;
 
-export type ShipId = 'vanguard' | 'phantom' | 'titan' | 'warden';
+export type ShipId = 'vanguard' | 'phantom' | 'titan' | 'warden' | 'nomad';
 
 export interface ShipDef {
   id: ShipId;
@@ -41,6 +41,11 @@ export const SHIPS: ShipDef[] = [
     descFa: 'نگهبان مداری — شروع با ۱ تیغه + ۱ آرمور، فایر کمتر',
     color: '#3dff8e', damage: 1, fireRate: 0.92, moveSpeed: 0.97, maxHp: 1.2, magnet: 1, dashCd: 1,
   },
+  {
+    id: 'nomad', nameFa: 'نومد', nameEn: 'NOMAD',
+    descFa: 'مزرعه‌دار خلأ — مگنت و تجربه بیشتر، دمیج کمتر',
+    color: '#fb7185', damage: 0.9, fireRate: 1, moveSpeed: 1.08, maxHp: 0.9, magnet: 1.8, dashCd: 0.9,
+  },
 ];
 
 export type EnemyKind =
@@ -61,9 +66,9 @@ export type EnemyKind =
   | 'juggernaut'
   | 'tempest';
 
-export type PowerUpKind = 'shield' | 'magnet' | 'nuke' | 'overdrive' | 'heal' | 'frost';
+export type PowerUpKind = 'shield' | 'magnet' | 'nuke' | 'overdrive' | 'heal' | 'frost' | 'greed' | 'phase';
 
-export type MutatorKind = 'swarm' | 'snipers' | 'elite_hunt' | 'surge' | 'gold_rush' | 'voidstorm';
+export type MutatorKind = 'swarm' | 'snipers' | 'elite_hunt' | 'surge' | 'gold_rush' | 'voidstorm' | 'frenzy';
 
 export interface MutatorDef {
   kind: MutatorKind;
@@ -79,6 +84,7 @@ export const MUTATORS: Record<MutatorKind, MutatorDef> = {
   surge: { kind: 'surge', nameFa: 'موج سرعت', nameEn: 'SPEED SURGE', scoreMult: 1.3 },
   gold_rush: { kind: 'gold_rush', nameFa: 'تب طلا', nameEn: 'GOLD RUSH', scoreMult: 1.3 },
   voidstorm: { kind: 'voidstorm', nameFa: 'طوفان خلأ', nameEn: 'VOIDSTORM', scoreMult: 1.6 },
+  frenzy: { kind: 'frenzy', nameFa: 'جنون', nameEn: 'FRENZY', scoreMult: 1.4 },
 };
 
 /** Permanent meta progression (Void Lab) — each track 0..META_MAX_LEVEL. */
@@ -166,6 +172,9 @@ export function statsForShip(ship: ShipId, meta: MetaLevels = META_ZERO): Player
   if (ship === 'warden') {
     s.orbitals = 1;
     s.armor += 1;
+  }
+  if (ship === 'nomad') {
+    s.xpGainMult *= 1.25;
   }
   // permanent meta bonuses (Void Lab)
   s.damage *= 1 + 0.02 * meta.dmg;

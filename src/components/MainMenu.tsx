@@ -3,7 +3,7 @@ import {
   Star, Rocket, Ghost, Anchor, Medal, Swords, Timer, Layers,
   Droplet, Sparkles, Crown, Skull, Orbit, Award, Crosshair,
   FlaskConical, Gem, Hexagon, Snowflake, HeartPulse, BookOpen,
-  History, Infinity as InfinityIcon,
+  History, Infinity as InfinityIcon, Compass,
 } from 'lucide-react';
 import { SHIPS, type ShipDef, type ShipId } from '../game/types';
 import { getRuns, type BoardEntry, type SavedSettings, type Totals } from '../game/storage';
@@ -31,6 +31,8 @@ const ACH_ICON: Record<string, typeof Shield> = {
   hexagon: Hexagon,
   snowflake: Snowflake,
   heartpulse: HeartPulse,
+  gem: Gem,
+  ghost: Ghost,
 };
 
 interface Props {
@@ -59,6 +61,7 @@ const SHIP_ICON: Record<ShipId, typeof Rocket> = {
   phantom: Ghost,
   titan: Anchor,
   warden: Shield,
+  nomad: Compass,
 };
 
 function bar(v: number, min: number, max: number): number {
@@ -149,7 +152,7 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
             <div className="eyebrow" dir="ltr">SELECT SHIP</div>
             <div className="text-[11px] text-slate-500">هر کشتی یک سبک بازی</div>
           </div>
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
             {SHIPS.map((s, i) => {
               const Icon = SHIP_ICON[s.id];
               const active = settings.ship === s.id;
@@ -161,7 +164,7 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
                     active
                       ? 'border-cyan-200/50 bg-cyan-300/[0.09] shadow-[0_0_32px_rgba(0,240,255,0.18),inset_0_1px_0_rgba(255,255,255,0.1)]'
                       : 'border-white/[0.07] bg-white/[0.025]'
-                  } stagger-${Math.min(4, i + 1)}`}
+                  } stagger-${Math.min(5, i + 1)}`}
                   style={active ? { boxShadow: `0 0 32px ${s.color}33, inset 0 1px 0 rgba(255,255,255,0.1)` } : undefined}
                 >
                   <div className="flex items-center justify-between">

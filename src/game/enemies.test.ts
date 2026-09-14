@@ -87,12 +87,16 @@ describe('createEnemy', () => {
   });
 
   it('scales with waves and endless', () => {
-    const early = createEnemy('chaser', 0, 0, { ...ctx, wave: 1 });
-    const late = createEnemy('chaser', 0, 0, { ...ctx, wave: 15 });
-    expect(late.maxHp).toBeGreaterThan(early.maxHp);
-    const endless = createEnemy('chaser', 0, 0, { ...ctx, wave: 25, endless: true });
-    const same = createEnemy('chaser', 0, 0, { ...ctx, wave: 25, endless: false });
-    expect(endless.maxHp).toBeGreaterThan(same.maxHp);
+    // elites roll randomly — compare plain (non-elite) samples only
+    const plain = (wave: number, endless: boolean) => {
+      for (let i = 0; i < 50; i++) {
+        const e = createEnemy('chaser', 0, 0, { ...ctx, wave, endless });
+        if (!e.elite) return e;
+      }
+      throw new Error('no plain enemy sampled');
+    };
+    expect(plain(15, false).maxHp).toBeGreaterThan(plain(1, false).maxHp);
+    expect(plain(25, true).maxHp).toBeGreaterThan(plain(25, false).maxHp);
   });
 
   it('never makes bosses or minis elite', () => {
@@ -130,5 +134,12 @@ describe('difficulty', () => {
     for (let i = 0; i < 400; i++) seen.add(pickKindFor(10, null));
     expect(seen.has('bomber')).toBe(true);
     expect(seen.has('tesla')).toBe(true);
+  });
+
+  it('knows the frenzy mutator', () => {
+    const f = createEnemy('chaser', 0, 0, { ...ctx, mutator: 'frenzy' });
+    const calm = createEnemy('chaser', 0, 0, { ...ctx, mutator: null });
+    expect(f.speed).toBeGreaterThan(calm.speed);
+    expect(f.score).toBeGreaterThan(calm.score);
   });
 });

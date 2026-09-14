@@ -293,10 +293,10 @@ export function createEnemy(kind: EnemyKind, x: number, y: number, ctx: SpawnCon
     }
   }
   base.hp = base.maxHp = Math.round(base.hp);
-  // surge mutator: faster enemies
-  if (ctx.mutator === 'surge' && !isBossKind(kind)) {
-    base.speed *= 1.25;
-    base.score = Math.round(base.score * MUTATORS.surge.scoreMult);
+  // surge mutator: faster enemies (frenzy: slightly faster + meaner handled by spawn rate)
+  if ((ctx.mutator === 'surge' || ctx.mutator === 'frenzy') && !isBossKind(kind)) {
+    base.speed *= ctx.mutator === 'surge' ? 1.25 : 1.1;
+    base.score = Math.round(base.score * (ctx.mutator === 'surge' ? MUTATORS.surge.scoreMult : MUTATORS.frenzy.scoreMult));
   }
   // elite roll (not for minis or bosses)
   if (!isBossKind(kind) && kind !== 'mini' && Math.random() < eliteChanceFor(ctx.wave, ctx.mutator, ctx.difficulty)) {

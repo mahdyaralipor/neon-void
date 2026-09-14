@@ -82,6 +82,8 @@ const POWERUP_COLOR: Record<PowerUpKind, string> = {
   overdrive: '#ffd319',
   heal: '#3dff8e',
   frost: '#7dd3fc',
+  greed: '#e879f9',
+  phase: '#e2e8f0',
 };
 
 const POWERUP_FA: Record<PowerUpKind, string> = {
@@ -91,6 +93,8 @@ const POWERUP_FA: Record<PowerUpKind, string> = {
   overdrive: 'اور‌درایو!',
   heal: '+۴۰ جان!',
   frost: '❄ یخبندان!',
+  greed: '◆ طمع طلایی! (جم ۲×)',
+  phase: '◇ فاز شبح! (۵ ثانیه نامرئی)',
 };
 
 export class GameEngine {
@@ -172,6 +176,8 @@ export class GameEngine {
   private shieldT = 0;
   private overdriveT = 0;
   private magnetAllT = 0;
+  private greedT = 0;
+  private phaseT = 0;
   private powerupsCollected = 0;
   private ghosts: Ghost[] = [];
   private ghostAcc = 0;
@@ -496,6 +502,7 @@ export class GameEngine {
     this.ghosts = [];
     this.grid.clear();
     this.shieldT = 0; this.overdriveT = 0; this.magnetAllT = 0;
+    this.greedT = 0; this.phaseT = 0;
     this.powerupsCollected = 0;
     this.announce = null; this.announceT = 0;
     this.announcePrio = 0; this.pendingAnnounce = null;
@@ -986,6 +993,8 @@ export class GameEngine {
     if (this.overdriveT > 0) active.push({ kind: 'overdrive', t: this.overdriveT });
     if (this.magnetAllT > 0) active.push({ kind: 'magnet', t: this.magnetAllT });
     if (this.frostT > 0) active.push({ kind: 'frost', t: this.frostT });
+    if (this.greedT > 0) active.push({ kind: 'greed', t: this.greedT });
+    if (this.phaseT > 0) active.push({ kind: 'phase', t: this.phaseT });
     const snap: HudSnapshot = {
       hp: Math.max(0, Math.ceil(this.hp)),
       maxHp: Math.round(this.stats.maxHp),
@@ -1123,6 +1132,8 @@ export class GameEngine {
     this.shieldT = Math.max(0, this.shieldT - dt);
     this.overdriveT = Math.max(0, this.overdriveT - dt);
     this.magnetAllT = Math.max(0, this.magnetAllT - dt);
+    this.greedT = Math.max(0, this.greedT - dt);
+    this.phaseT = Math.max(0, this.phaseT - dt);
     this.waveBannerT = Math.max(0, this.waveBannerT - dt);
     this.announceT = Math.max(0, this.announceT - dt);
     if (this.announceT <= 0) {
@@ -1268,7 +1279,7 @@ export class GameEngine {
         this.ghosts.push({ x: this.px, y: this.py, aim: this.aim, life: 0.4 });
       }
     } else {
-      const sp = this.stats.moveSpeed * (berserk ? 1.5 : 1);
+      const sp = this.stats.moveSpeed * (berserk ? 1.5 : 1) * (this.phaseT > 0 ? 1.3 : 1);
       const tx = mv.x * sp;
       const ty = mv.y * sp;
       const k = Math.min(1, dt * 10);
@@ -1431,6 +1442,7 @@ export class GameEngine {
       // v3.2: snappier early game — denser spawns from wave 3
       let interval = Math.max(0.1, (rand(0.4, 0.85) - this.wave * 0.055) * d.interval);
       if (this.mutator === 'swarm') interval *= 0.55;
+      if (this.mutator === 'frenzy') interval *= 0.7;
       this.spawnT = interval;
       const r = Math.random();
       const batch = this.wave >= 6 && r < 0.22 ? 3 : this.wave >= 3 && r < 0.42 ? 2 : 1;
@@ -1522,7 +1534,7 @@ export class GameEngine {
       this.mutator = null;
       return;
     }
-    const kinds: MutatorKind[] = ['swarm', 'snipers', 'elite_hunt', 'surge', 'gold_rush', 'voidstorm'];
+    const kinds: MutatorKind[] = ['swarm', 'snipers', 'elite_hunt', 'surge', 'gold_rush', 'voidstorm', 'frenzy'];
     this.mutator = kinds[Math.floor(Math.random() * kinds.length)];
     const def = MUTATORS[this.mutator];
     this.setAnnounce(`🌀 موتاتور: ${def.nameFa}! (امتیاز ×${def.scoreMult})`, 2.6, 2);
@@ -2438,7 +2450,7 @@ export class GameEngine {
       this.powerups.shift();
     }
     this.pityT = 0;
-    const kinds: PowerUpKind[] = ['shield', 'magnet', 'nuke', 'overdrive', 'heal', 'frost'];
+    const kinds: PowerUpKind[] = ['shield', 'magnet', 'nuke', 'overdrive', 'heal', 'frost', 'greed', 'phase'];
     const kind = guaranteed && Math.random() < 0.5 ? 'heal' : kinds[Math.floor(Math.random() * kinds.length)];
     this.powerups.push({
       x: clamp(x, 40, WORLD_W - 40), y: clamp(y, 40, WORLD_H - 40),
@@ -2500,6 +2512,13 @@ export class GameEngine {
         if (e.hp > 0 && !isBossKind(e.kind)) frozen++;
       }
       if (frozen >= 25) this.grantAchievement('frost_king');
+    } else if (kind === 'greed') {
+      this.greedT = 20;
+      this.grantAchievement('greed_is_good');
+    } else if (kind === 'phase') {
+      this.phaseT = 5;
+      this.audio.shieldUp();
+      this.grantAchievement('untouchable');
     } else if (kind === 'nuke') {
       this.detonateNuke();
       return;
@@ -2647,11 +2666,12 @@ export class GameEngine {
 
   private damagePlayer(raw: number, fromX: number, fromY: number, source: string | null = null): void {
     if (this.invuln > 0 || this.dashT > 0 || this.deathT >= 0 || this.victoryT >= 0) return;
-    if (this.shieldT > 0) {
-      // shield absorbs the hit with a spark
+    if (this.shieldT > 0 || this.phaseT > 0) {
+      // shield / phase ghost absorbs the hit with a spark
+      const col = this.phaseT > 0 ? '#e2e8f0' : '#00e5ff';
       this.invuln = 0.4;
-      this.fx.shockwave(this.px, this.py, '#00e5ff', 90, 0.3, 3);
-      this.fx.pickupBurst(this.px, this.py, '#00e5ff');
+      this.fx.shockwave(this.px, this.py, col, 90, 0.3, 3);
+      this.fx.pickupBurst(this.px, this.py, col);
       return;
     }
     const dmg = Math.max(1, raw - this.stats.armor);
@@ -2741,10 +2761,10 @@ export class GameEngine {
       }
       if (d2 < 30 * 30) {
         g.t = -999; // collected marker
-        this.addXp(g.val);
-        this.score += 5;
+        this.addXp(this.greedT > 0 ? g.val * 2 : g.val);
+        this.score += this.greedT > 0 ? 10 : 5;
         this.audio.pickup();
-        this.fx.pickupBurst(g.x, g.y);
+        this.fx.pickupBurst(g.x, g.y, this.greedT > 0 ? '#e879f9' : '#a3ff12');
       }
     }
     // overflow: merge oldest gems into mega-gems (never delete player XP)
@@ -2910,6 +2930,7 @@ export class GameEngine {
       ctx.textBaseline = 'middle';
       const glyph: Record<PowerUpKind, string> = {
         shield: '◈', magnet: '◎', nuke: '✸', overdrive: '⚡', heal: '✚', frost: '❄',
+        greed: '◆', phase: '◇',
       };
       ctx.fillText(glyph[p.kind], 0, 1);
       ctx.restore();
@@ -3130,6 +3151,7 @@ export class GameEngine {
     if (this.opts.ship === 'phantom') return '#b14bff';
     if (this.opts.ship === 'titan') return '#ffb020';
     if (this.opts.ship === 'warden') return '#3dff8e';
+    if (this.opts.ship === 'nomad') return '#fb7185';
     return '#00f0ff';
   }
 
@@ -3219,6 +3241,20 @@ export class GameEngine {
       ctx.beginPath();
       ctx.arc(this.px, this.py, 28, 0, TAU);
       ctx.fill();
+      ctx.restore();
+    }
+
+    // phase ghost — pale shimmer while untouchable
+    if (this.phaseT > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.35 + Math.sin(now / 120) * 0.12;
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 5]);
+      ctx.lineDashOffset = -now / 90;
+      ctx.beginPath();
+      ctx.arc(this.px, this.py, 30, 0, TAU);
+      ctx.stroke();
       ctx.restore();
     }
 
