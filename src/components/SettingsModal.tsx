@@ -10,8 +10,8 @@ interface Props {
 const DIFFS = [
   { id: 'easy', fa: 'آسان', en: 'CHILL', desc: 'راحت و آرام' },
   { id: 'normal', fa: 'معمولی', en: 'BALANCED', desc: 'تجربه استاندارد' },
-  { id: 'hard', fa: 'سخت', en: 'SPICY', desc: 'دشمنان قوی‌تر' },
-  { id: 'insane', fa: 'جهنمی', en: 'VOID', desc: 'فقط افسانه‌ها' },
+  { id: 'hard', fa: 'سخت', en: 'SPICY', desc: 'دشمنان قوی‌تر · +۱۰٪ امتیاز' },
+  { id: 'insane', fa: 'جهنمی', en: 'VOID', desc: 'جهنم واقعی · +۲۵٪ امتیاز' },
 ] as const;
 
 const SPEEDS = [

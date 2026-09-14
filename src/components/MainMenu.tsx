@@ -9,7 +9,7 @@ import { SHIPS, type ShipDef, type ShipId } from '../game/types';
 import { getRuns, type BoardEntry, type SavedSettings, type Totals } from '../game/storage';
 import type { MetaLevels } from '../game/types';
 import { ACHIEVEMENTS, getUnlockedAchievements } from '../game/achievements';
-import { ENEMY_COLOR, ENEMY_FA, ENEMY_LORE } from '../game/engine';
+import { ENEMY_COLOR, ENEMY_FA, ENEMY_LORE } from '../game/enemies';
 import type { EnemyKind } from '../game/types';
 import { formatTime } from '../game/utils';
 import MenuBackdrop from './MenuBackdrop';

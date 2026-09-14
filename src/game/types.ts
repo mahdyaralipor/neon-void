@@ -1,5 +1,8 @@
 export type Difficulty = 'easy' | 'normal' | 'hard' | 'insane';
 
+/** Clearing this wave wins the run (endless continues past it). */
+export const WIN_WAVE = 20;
+
 export type ShipId = 'vanguard' | 'phantom' | 'titan' | 'warden';
 
 export interface ShipDef {
@@ -52,7 +55,11 @@ export type EnemyKind =
   | 'lancer'
   | 'hive'
   | 'stinger'
-  | 'boss';
+  | 'bomber'
+  | 'tesla'
+  | 'boss'
+  | 'juggernaut'
+  | 'tempest';
 
 export type PowerUpKind = 'shield' | 'magnet' | 'nuke' | 'overdrive' | 'heal' | 'frost';
 

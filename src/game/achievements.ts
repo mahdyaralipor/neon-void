@@ -25,6 +25,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'chainlord', nameFa: 'ارباب صاعقه', nameEn: 'CHAIN LORD', descFa: 'گرفتن طوفان زنجیره‌ای', icon: 'combo' },
   { id: 'stinger15', nameFa: 'نیش‌شکن', nameEn: 'STING BREAKER', descFa: 'نابودی ۱۵ نیش‌دار', icon: 'skull' },
   { id: 'stormrider', nameFa: 'سوار طوفان', nameEn: 'STORM RIDER', descFa: 'بقا در موتاتور طوفان خلأ', icon: 'snowflake' },
+  { id: 'bomber10', nameFa: 'خنثی‌کننده', nameEn: 'BOMB SQUAD', descFa: 'نابودی ۱۰ بمب‌افکن', icon: 'nuke' },
+  { id: 'boss_trio', nameFa: 'سه‌تاج', nameEn: 'TRIPLE CROWN', descFa: 'شکست هر سه باس', icon: 'crown' },
 ];
 
 const KEY = 'neon-void-achievements-v1';
