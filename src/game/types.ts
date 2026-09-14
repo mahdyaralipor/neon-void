@@ -212,6 +212,8 @@ export interface EngineOptions {
   showDamageNumbers?: boolean;
   /** mid-run checkpoint to resume from (wave 5/10/15 builds) */
   checkpoint?: import('./storage').Checkpoint | null;
+  /** local co-op: a second pilot (arrows + Enter) shares the build */
+  coOp?: boolean;
 }
 
 export interface MinimapDot {
@@ -272,6 +274,16 @@ export interface HudSnapshot {
   quality: number; // 0 cinematic, 1 balanced, 2 performance, 3 potato
   mutator: MutatorKind | null;
   endless: boolean;
+  /** P2 pilot state — null in solo */
+  p2: {
+    hp: number;
+    maxHp: number;
+    dashCd: number;
+    dashMax: number;
+    alive: boolean;
+    x: number;
+    y: number;
+  } | null;
 }
 
 export type Grade = 'S' | 'A' | 'B' | 'C' | 'D';
@@ -292,6 +304,8 @@ export interface GameResult {
   powerups: number;
   victory: boolean;
   endless: boolean;
+  /** local co-op run (two pilots, one build) */
+  coOp: boolean;
   deathBy: string | null;
 }
 

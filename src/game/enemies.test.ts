@@ -13,6 +13,7 @@ import {
   eliteChanceFor,
   isBossKind,
   pickKindFor,
+  pickTarget,
   type SpawnContext,
 } from './enemies';
 
@@ -141,5 +142,24 @@ describe('difficulty', () => {
     const calm = createEnemy('chaser', 0, 0, { ...ctx, mutator: null });
     expect(f.speed).toBeGreaterThan(calm.speed);
     expect(f.score).toBeGreaterThan(calm.score);
+  });
+});
+
+describe('pickTarget', () => {
+  const p1 = { x: 0, y: 0, alive: true };
+  const p2 = { x: 100, y: 0, alive: true };
+
+  it('hunts the nearest living pilot', () => {
+    expect(pickTarget(90, 0, p1, p2)).toBe(p2);
+    expect(pickTarget(10, 0, p1, p2)).toBe(p1);
+  });
+
+  it('falls back to whoever is alive', () => {
+    expect(pickTarget(90, 0, p1, { ...p2, alive: false })).toBe(p1);
+    expect(pickTarget(10, 0, { ...p1, alive: false }, p2)).toBe(p2);
+  });
+
+  it('is solo-identical with no P2', () => {
+    expect(pickTarget(90, 0, p1, null)).toBe(p1);
   });
 });

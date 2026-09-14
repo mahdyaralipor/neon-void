@@ -241,6 +241,7 @@ export default function App() {
             onOpenLab={() => setShowLab(true)}
             onToggleMute={() => updateSettings({ ...settings, muted: !settings.muted })}
             onSelectShip={(s: ShipId) => updateSettings({ ...settings, ship: s })}
+            onToggleCoop={() => updateSettings({ ...settings, coOp: !settings.coOp })}
           />
           {showSettings && (
             <SettingsModal
@@ -293,7 +294,7 @@ export default function App() {
           {/* bottom-left hint */}
           {phase === 'playing' && (
             <div className="font-display pointer-events-none absolute bottom-3 left-3 z-20 hidden text-[10px] tracking-[0.14em] text-slate-600 md:block" dir="ltr">
-              WASD MOVE · MOUSE AIM · SHIFT DASH · P PAUSE
+              {settings.coOp ? 'P1 WASD · MOUSE · SHIFT DASH — P2 ARROWS · ENTER DASH' : 'WASD MOVE · MOUSE AIM · SHIFT DASH · P PAUSE'}
             </div>
           )}
 
@@ -304,6 +305,9 @@ export default function App() {
                 <span className="chip !bg-black/60 !text-[11px] backdrop-blur-md">حرکت با WASD</span>
                 <span className="chip !bg-black/60 !text-[11px] backdrop-blur-md">شلیک خودکار است — فقط aim بگیر</span>
                 <span className="chip !bg-black/60 !text-[11px] backdrop-blur-md">Shift دش می‌زند</span>
+                {settings.coOp && (
+                  <span className="chip !bg-black/60 !text-[11px] backdrop-blur-md">P2: جهت‌نما + Enter</span>
+                )}
               </div>
             </div>
           )}

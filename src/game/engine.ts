@@ -21,7 +21,7 @@ import { statsForShip, MUTATORS, WIN_WAVE } from './types';
 import type { Enemy } from './enemies';
 import {
   DIFF, ENEMY_COLOR, ENEMY_FA, isBossKind, bossVariantForWave,
-  createEnemy, pickKindFor, diffScoreMultFor, bulletSpeedMultFor,
+  createEnemy, pickKindFor, pickTarget, diffScoreMultFor, bulletSpeedMultFor,
 } from './enemies';
 import { SynthAudio } from './audio';
 import { ParticleSystem } from './particles';
@@ -66,6 +66,21 @@ interface PowerUp {
 
 interface Ghost {
   x: number; y: number; aim: number; life: number;
+}
+
+/** One pilot body. In solo only fighters[0] lives; co-op adds fighters[1].
+ *  The build (stats/taken/upgrades) is always shared. */
+interface Fighter {
+  x: number; y: number; vx: number; vy: number;
+  aim: number;
+  hp: number;
+  fireCd: number;
+  dashCd: number;
+  dashT: number;
+  dashDx: number; dashDy: number;
+  invuln: number;
+  hurtFlash: number;
+  alive: boolean;
 }
 
 interface Stick {
@@ -124,19 +139,45 @@ export class GameEngine {
   private leftStick: Stick = { active: false, id: -1, ox: 0, oy: 0, dx: 0, dy: 0 };
   private rightStick: Stick = { active: false, id: -1, ox: 0, oy: 0, dx: 0, dy: 0 };
 
-  // player
-  private px = WORLD_W / 2;
-  private py = WORLD_H / 2;
-  private pvx = 0;
-  private pvy = 0;
-  private aim = 0;
-  private hp = 100;
-  private fireCd = 0;
-  private dashCd = 0;
-  private dashT = 0;
-  private dashDx = 1;
-  private dashDy = 0;
-  private invuln = 0;
+  // co-op: two bodies (fighters), one shared build. P1 fields are proxied
+  // to fighters[0] so every solo code path stays byte-identical.
+  private fighters: Fighter[] = [GameEngine.freshFighter(-30), GameEngine.freshFighter(30)];
+  private static freshFighter(offsetX: number): Fighter {
+    return {
+      x: WORLD_W / 2 + offsetX, y: WORLD_H / 2,
+      vx: 0, vy: 0, aim: -Math.PI / 2, hp: 100,
+      fireCd: 0.1, dashCd: 0, dashT: 0, dashDx: 1, dashDy: 0,
+      invuln: 0, hurtFlash: 0, alive: true,
+    };
+  }
+  private get px(): number { return this.fighters[0].x; }
+  private set px(v: number) { this.fighters[0].x = v; }
+  private get py(): number { return this.fighters[0].y; }
+  private set py(v: number) { this.fighters[0].y = v; }
+  private get pvx(): number { return this.fighters[0].vx; }
+  private set pvx(v: number) { this.fighters[0].vx = v; }
+  private get pvy(): number { return this.fighters[0].vy; }
+  private set pvy(v: number) { this.fighters[0].vy = v; }
+  private get aim(): number { return this.fighters[0].aim; }
+  private set aim(v: number) { this.fighters[0].aim = v; }
+  private get hp(): number { return this.fighters[0].hp; }
+  private set hp(v: number) { this.fighters[0].hp = v; }
+  private get fireCd(): number { return this.fighters[0].fireCd; }
+  private set fireCd(v: number) { this.fighters[0].fireCd = v; }
+  private get dashCd(): number { return this.fighters[0].dashCd; }
+  private set dashCd(v: number) { this.fighters[0].dashCd = v; }
+  private get dashT(): number { return this.fighters[0].dashT; }
+  private set dashT(v: number) { this.fighters[0].dashT = v; }
+  private get dashDx(): number { return this.fighters[0].dashDx; }
+  private set dashDx(v: number) { this.fighters[0].dashDx = v; }
+  private get dashDy(): number { return this.fighters[0].dashDy; }
+  private set dashDy(v: number) { this.fighters[0].dashDy = v; }
+  private get invuln(): number { return this.fighters[0].invuln; }
+  private set invuln(v: number) { this.fighters[0].invuln = v; }
+  private get hurtFlash(): number { return this.fighters[0].hurtFlash; }
+  private set hurtFlash(v: number) { this.fighters[0].hurtFlash = v; }
+  /** P2 is in the arena only in co-op mode. */
+  private get coOp(): boolean { return this.opts.coOp === true; }
   private stats: PlayerStats = statsForShip('vanguard');
 
   // run state
@@ -215,7 +256,6 @@ export class GameEngine {
   private swCd = 0; // second-wind cooldown
   private shards = 0;
   private hives = 0;
-  private hurtFlash = 0;
   private recoil = 0;
   private bossSpiralAnn = false;
   private bossEnrageAnn = false;
@@ -473,16 +513,38 @@ export class GameEngine {
     this.fx.shockwave(this.px, this.py, '#00f0ff', 90, 0.3, 3);
   }
 
+  /** P2 dash — solo delegates to P1 so ShiftRight keeps working alone. */
+  tryDashP2(): void {
+    if (!this.coOp) {
+      this.tryDash();
+      return;
+    }
+    if (this.paused || this.deathT >= 0) return;
+    const q = this.fighters[1];
+    if (!q.alive || q.dashCd > 0 || q.dashT > 0) return;
+    let dx = q.vx;
+    let dy = q.vy;
+    if (Math.abs(dx) + Math.abs(dy) < 10) {
+      dx = Math.cos(q.aim);
+      dy = Math.sin(q.aim);
+    }
+    const l = Math.hypot(dx, dy) || 1;
+    q.dashDx = dx / l;
+    q.dashDy = dy / l;
+    q.dashT = 0.18;
+    q.dashCd = this.stats.dashCooldownMax;
+    q.invuln = Math.max(q.invuln, 0.28);
+    this.audio.dash();
+    this.fx.shockwave(q.x, q.y, '#ffffff', 90, 0.3, 3);
+  }
+
   // ---------- setup ----------
 
   private reset(): void {
     this.stats = statsForShip(this.opts.ship, this.opts.meta);
-    this.px = WORLD_W / 2;
-    this.py = WORLD_H / 2;
-    this.pvx = 0; this.pvy = 0;
-    this.hp = this.stats.maxHp;
-    this.fireCd = 0.1;
-    this.dashCd = 0; this.dashT = 0; this.invuln = 0;
+    this.fighters = [GameEngine.freshFighter(-30), GameEngine.freshFighter(30)];
+    this.fighters[0].hp = this.stats.maxHp;
+    this.fighters[1].hp = this.stats.maxHp;
     this.time = 0; this.kills = 0; this.elites = 0; this.score = 0;
     this.level = 1; this.xp = 0; this.xpNext = 26;
     this.combo = 0; this.comboT = 0; this.maxCombo = 0;
@@ -654,8 +716,11 @@ export class GameEngine {
     if (e.repeat) return;
     this.keys.add(e.code);
     this.audio.ensure();
-    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'Space') {
+    if (e.code === 'ShiftLeft' || e.code === 'Space') {
       this.tryDash();
+    } else if (e.code === 'ShiftRight' || e.code === 'Enter' || e.code === 'Numpad0') {
+      // P2 dash (co-op) — harmless solo (fighters[1] is ignored there)
+      this.tryDashP2();
     }
   };
 
@@ -1039,6 +1104,17 @@ export class GameEngine {
       quality: this.quality,
       mutator: this.mutator,
       endless: this.endless,
+      p2: this.coOp
+        ? {
+            hp: Math.max(0, Math.ceil(this.fighters[1].hp)),
+            maxHp: Math.round(this.stats.maxHp),
+            dashCd: Math.max(0, this.fighters[1].dashCd),
+            dashMax: this.stats.dashCooldownMax,
+            alive: this.fighters[1].alive,
+            x: this.fighters[1].x,
+            y: this.fighters[1].y,
+          }
+        : null,
     };
     this.cb.onHud(snap);
   }
@@ -1108,12 +1184,12 @@ export class GameEngine {
         Math.min(
           1,
           0.12 + this.wave * 0.05 + this.enemies.length * 0.008 + (this.boss ? 0.35 : 0) +
-            (this.hp < this.stats.maxHp * 0.3 ? 0.15 : 0),
+            (this.lowestHpFrac() < 0.3 ? 0.15 : 0),
         ),
       );
       this.audio.setIntensity(inten);
     }
-    if (this.hp < this.stats.maxHp * 0.3 && this.hp > 0) {
+    if (this.lowestHpFrac() < 0.3 && this.lowestHpFrac() > 0) {
       this.heartbeatT -= dt;
       if (this.heartbeatT <= 0) {
         this.heartbeatT = 1.1;
@@ -1126,6 +1202,13 @@ export class GameEngine {
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.invuln = Math.max(0, this.invuln - dt);
     this.hurtFlash = Math.max(0, this.hurtFlash - dt);
+    if (this.coOp) {
+      const q = this.fighters[1];
+      q.fireCd -= dt;
+      q.dashCd = Math.max(0, q.dashCd - dt);
+      q.invuln = Math.max(0, q.invuln - dt);
+      q.hurtFlash = Math.max(0, q.hurtFlash - dt);
+    }
     this.recoil = Math.max(0, this.recoil - dt * 6);
     this.swCd = Math.max(0, this.swCd - dt);
     this.frostT = Math.max(0, this.frostT - dt);
@@ -1151,16 +1234,40 @@ export class GameEngine {
       this.comboT -= dt;
       if (this.comboT <= 0) this.combo = 0;
     }
-    // regen (+ emergency protocol)
+    // regen (+ emergency protocol) — shared pool heals both pilots
     let regen = this.stats.regen;
-    if ((this.taken.get('emergency') ?? 0) > 0 && this.hp < this.stats.maxHp * 0.3) {
-      regen += 4 * (this.taken.get('emergency') ?? 0);
+    if ((this.taken.get('emergency') ?? 0) > 0) {
+      const low = this.hp < this.stats.maxHp * 0.3 ||
+        (this.coOp && this.fighters[1].alive && this.fighters[1].hp < this.stats.maxHp * 0.3);
+      if (low) regen += 4 * (this.taken.get('emergency') ?? 0);
     }
-    if (this.hp < this.stats.maxHp) {
-      this.hp = Math.min(this.stats.maxHp, this.hp + regen * dt);
+    for (const f of this.fighters) {
+      if (!f.alive) continue;
+      if (f.hp < this.stats.maxHp) {
+        f.hp = Math.min(this.stats.maxHp, f.hp + regen * dt);
+      }
     }
 
     this.updatePlayer(dt);
+    this.updatePlayer2(dt);
+    // co-op pilots softly push apart so they never fully stack
+    if (this.coOp) {
+      const a = this.fighters[0];
+      const b = this.fighters[1];
+      if (a.alive && b.alive) {
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > 0.01 && d2 < 40 * 40) {
+          const d = Math.sqrt(d2) || 1;
+          const push = ((40 - d) / d) * 3;
+          a.x -= (dx / d) * push;
+          a.y -= (dy / d) * push;
+          b.x += (dx / d) * push;
+          b.y += (dy / d) * push;
+        }
+      }
+    }
     this.updateDirector(dt);
     this.updateBullets(dt);
     // frost powerup: enemies move/act in slow motion (bullets keep speed)
@@ -1175,6 +1282,15 @@ export class GameEngine {
     for (const g of this.ghosts) g.life -= dt;
     sweep(this.ghosts, (g) => g.life > 0);
     this.trauma = Math.max(0, this.trauma - dt * 1.6);
+  }
+
+  /** lowest living-pilot HP fraction (P1 in solo) — drives heartbeat + vignette */
+  private lowestHpFrac(): number {
+    let worst = this.fighters[0].alive ? this.fighters[0].hp / this.stats.maxHp : 1;
+    if (this.coOp && this.fighters[1].alive) {
+      worst = Math.min(worst, this.fighters[1].hp / this.stats.maxHp);
+    }
+    return worst;
   }
 
   private calcGrade(): Grade {
@@ -1195,6 +1311,7 @@ export class GameEngine {
     pushBoard({
       score, wave: this.wave, kills: this.kills,
       time: Math.floor(this.time), ship: this.opts.ship, date: Date.now(),
+      coOp: this.coOp,
     });
     // endless continues after a victory screen — only count the delta,
     // otherwise one run lands in the totals twice.
@@ -1211,7 +1328,7 @@ export class GameEngine {
       pushRun({
         score, wave: this.wave, kills: this.kills,
         time: Math.floor(this.time), ship: this.opts.ship, date: Date.now(),
-        victory, endless: this.endless,
+        victory, endless: this.endless, coOp: this.coOp,
       });
     } catch {
       /* storage unavailable */
@@ -1232,6 +1349,7 @@ export class GameEngine {
       powerups: this.powerupsCollected,
       victory,
       endless: this.endless,
+      coOp: this.coOp,
       deathBy: victory ? null : this.deathBy,
     };
     if (victory) {
@@ -1246,10 +1364,12 @@ export class GameEngine {
   private moveInput(): { x: number; y: number } {
     let x = 0;
     let y = 0;
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) y -= 1;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) y += 1;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) x -= 1;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) x += 1;
+    // solo keeps the arrows; co-op gives them to P2
+    const arrows = !this.coOp;
+    if (this.keys.has('KeyW') || (arrows && this.keys.has('ArrowUp'))) y -= 1;
+    if (this.keys.has('KeyS') || (arrows && this.keys.has('ArrowDown'))) y += 1;
+    if (this.keys.has('KeyA') || (arrows && this.keys.has('ArrowLeft'))) x -= 1;
+    if (this.keys.has('KeyD') || (arrows && this.keys.has('ArrowRight'))) x += 1;
     if (this.leftStick.active) {
       x += this.leftStick.dx / 70;
       y += this.leftStick.dy / 70;
@@ -1262,7 +1382,23 @@ export class GameEngine {
     return { x, y };
   }
 
+  private moveInputP2(): { x: number; y: number } {
+    let x = 0;
+    let y = 0;
+    if (this.keys.has('ArrowUp')) y -= 1;
+    if (this.keys.has('ArrowDown')) y += 1;
+    if (this.keys.has('ArrowLeft')) x -= 1;
+    if (this.keys.has('ArrowRight')) x += 1;
+    const l = Math.hypot(x, y);
+    if (l > 1) {
+      x /= l;
+      y /= l;
+    }
+    return { x, y };
+  }
+
   private updatePlayer(dt: number): void {
+    if (!this.fighters[0].alive) return; // co-op ghost waits for the wave clear
     const mv = this.moveInput();
     const berserk = (this.taken.get('emergency') ?? 0) > 0 && this.hp < this.stats.maxHp * 0.3;
     if (this.dashT > 0) {
@@ -1319,7 +1455,7 @@ export class GameEngine {
 
     // fire (always auto-fire; overdrive boosts rate + damage handled in volley)
     if (this.fireCd <= 0) {
-      this.fireVolley();
+      this.fireVolley(this.px, this.py, this.aim, this.pvx, this.pvy);
       const rate = this.stats.fireRate * (this.overdriveT > 0 ? 1.7 : 1);
       this.fireCd += 1 / rate;
       if (this.fireCd < -0.1) this.fireCd = 0;
@@ -1327,6 +1463,53 @@ export class GameEngine {
       this.pvx -= Math.cos(this.aim) * 16;
       this.pvy -= Math.sin(this.aim) * 16;
       this.recoil = 1;
+    }
+  }
+
+  /** P2 pilot: arrows to move, always auto-aims + auto-fires the shared build. */
+  private updatePlayer2(dt: number): void {
+    if (!this.coOp) return;
+    const q = this.fighters[1];
+    if (!q.alive) return;
+    const mv = this.moveInputP2();
+    const berserk = (this.taken.get('emergency') ?? 0) > 0 && q.hp < this.stats.maxHp * 0.3;
+    if (q.dashT > 0) {
+      q.dashT -= dt;
+      const power = 1000;
+      q.vx = q.dashDx * power;
+      q.vy = q.dashDy * power;
+      this.fx.trail(q.x, q.y, '#ffffff');
+      this.fx.trail(q.x, q.y, '#fb7185');
+      this.ghostAcc -= dt;
+      if (this.ghostAcc <= 0) {
+        this.ghostAcc = 0.025;
+        this.ghosts.push({ x: q.x, y: q.y, aim: q.aim, life: 0.4 });
+      }
+    } else {
+      const sp = this.stats.moveSpeed * (berserk ? 1.5 : 1) * (this.phaseT > 0 ? 1.3 : 1);
+      const k = Math.min(1, dt * 10);
+      q.vx += (mv.x * sp - q.vx) * k;
+      q.vy += (mv.y * sp - q.vy) * k;
+      const spd = Math.hypot(q.vx, q.vy);
+      if (spd > 260) {
+        this.moveTrailAcc -= dt;
+        if (this.moveTrailAcc <= 0) {
+          this.moveTrailAcc = 0.03;
+          this.fx.trail(q.x, q.y, '#ffffff');
+        }
+      }
+    }
+    q.x = clamp(q.x + q.vx * dt, 24, WORLD_W - 24);
+    q.y = clamp(q.y + q.vy * dt, 24, WORLD_H - 24);
+    // auto-aim the nearest threat, else keep the last heading
+    const near = this.nearestEnemyFrom(q.x, q.y, 900);
+    if (near) q.aim = angleTo(q.x, q.y, near.x, near.y);
+    else if (Math.hypot(mv.x, mv.y) > 0.1) q.aim = Math.atan2(mv.y, mv.x);
+    if (q.fireCd <= 0) {
+      this.fireVolley(q.x, q.y, q.aim, q.vx, q.vy);
+      const rate = this.stats.fireRate * (this.overdriveT > 0 ? 1.7 : 1);
+      q.fireCd += 1 / rate;
+      if (q.fireCd < -0.1) q.fireCd = 0;
     }
   }
 
@@ -1369,9 +1552,9 @@ export class GameEngine {
     return out.map((o) => o.e);
   }
 
-  private fireVolley(): void {
+  private fireVolley(x: number, y: number, aim: number, vx: number, vy: number): void {
     const n = this.stats.multishot;
-    const base = this.aim;
+    const base = aim;
     const od = this.overdriveT > 0 ? 1.5 : 1;
     for (let i = 0; i < n; i++) {
       const off = (i - (n - 1) / 2) * this.stats.spread * 2.2;
@@ -1380,10 +1563,10 @@ export class GameEngine {
       const dmg = this.stats.damage * od * (crit ? this.stats.critMult : 1) * rand(0.92, 1.08);
       const sp = this.stats.bulletSpeed;
       const b = this.allocBullet(true);
-      b.x = this.px + Math.cos(a) * 20;
-      b.y = this.py + Math.sin(a) * 20;
-      b.vx = Math.cos(a) * sp + this.pvx * 0.25;
-      b.vy = Math.sin(a) * sp + this.pvy * 0.25;
+      b.x = x + Math.cos(a) * 20;
+      b.y = y + Math.sin(a) * 20;
+      b.vx = Math.cos(a) * sp + vx * 0.25;
+      b.vy = Math.sin(a) * sp + vy * 0.25;
       b.r = crit ? 6.5 : 5;
       b.dmg = dmg;
       b.pierce = this.stats.pierce;
@@ -1391,8 +1574,8 @@ export class GameEngine {
       b.crit = crit;
       this.bullets.push(b);
     }
-    this.fx.muzzle(this.px + Math.cos(base) * 22, this.py + Math.sin(base) * 22, base, '#00f0ff');
-    this.fx.muzzle(this.px + Math.cos(base) * 22, this.py + Math.sin(base) * 22, base, '#ffffff');
+    this.fx.muzzle(x + Math.cos(base) * 22, y + Math.sin(base) * 22, base, '#00f0ff');
+    this.fx.muzzle(x + Math.cos(base) * 22, y + Math.sin(base) * 22, base, '#ffffff');
     this.audio.shoot();
   }
 
@@ -1451,15 +1634,30 @@ export class GameEngine {
     if (this.waveKills >= this.waveQuota && this.enemies.length === 0 && this.deathT < 0 && this.victoryT < 0) {
       // wave cleared — vacuum gems briefly so rewards feel instant
       this.score += 100 * this.wave;
-      this.hp = Math.min(this.stats.maxHp, this.hp + this.stats.maxHp * 0.12);
+      for (const f of this.fighters) {
+        if (!f.alive && this.coOp) {
+          // co-op comeback: the fallen pilot drops back in at half health
+          f.alive = true;
+          f.hp = Math.round(this.stats.maxHp * 0.5);
+          f.invuln = 2;
+          const anchor = this.fighters[0].alive ? this.fighters[0] : f;
+          f.x = clamp(anchor.x + rand(-60, 60), 24, WORLD_W - 24);
+          f.y = clamp(anchor.y + rand(-60, 60), 24, WORLD_H - 24);
+          this.setAnnounce('💚 هم‌تیمی برگشت!', 2.2, 2);
+          this.fx.shockwave(f.x, f.y, '#3dff8e', 160, 0.6, 5);
+        }
+        if (f.alive) f.hp = Math.min(this.stats.maxHp, f.hp + this.stats.maxHp * 0.12);
+      }
+      if (this.coOp && this.wave === 10) this.grantAchievement('blood_brothers');
       this.magnetAllT = Math.max(this.magnetAllT, 1.6);
       if (this.wave >= WIN_WAVE && !this.endless) {
         // ★ VICTORY — the void is conquered. Endless continues after the screen.
         this.victoryT = 0;
         this.slowmoT = Math.max(this.slowmoT, 1.2);
         this.trauma = this.reducedMotion ? 0 : Math.min(1, this.trauma + 0.4);
-        this.fx.shockwave(this.px, this.py, '#f2e6c8', 420, 1, 7);
-        this.fx.explosion(this.px, this.py, '#f2e6c8', 60, 520);
+        const vc = this.celebrate();
+        this.fx.shockwave(vc.x, vc.y, '#f2e6c8', 420, 1, 7);
+        this.fx.explosion(vc.x, vc.y, '#f2e6c8', 60, 520);
         this.setAnnounce(`✦ پیروزی! خلأ در موج ${WIN_WAVE} رام شد (+10 ◇)`, 3, 3);
         this.audio.duck(1.2);
         this.audio.levelup();
@@ -1486,7 +1684,8 @@ export class GameEngine {
       if (!this.endless && this.wave === WIN_WAVE - 1) {
         this.setAnnounce(`موج ${this.wave} پاکسازی شد! یک موج تا پیروزی…`, 2.4, 2);
       }
-      this.fx.shockwave(this.px, this.py, '#ffd319', 200, 0.6, 5);
+      const wc = this.celebrate();
+      this.fx.shockwave(wc.x, wc.y, '#ffd319', 200, 0.6, 5);
       this.audio.levelup();
       this.intermission = 2.0;
       this.emitHud();
@@ -1510,9 +1709,14 @@ export class GameEngine {
           this.fx.explosion(sx, sy, '#5df2ff', 26, 480);
           this.audio.nova();
           if (!this.reducedMotion) this.trauma = Math.min(1, this.trauma + 0.25);
-          // hurts player if standing in it
-          if (dist2(sx, sy, this.px, this.py) < 95 * 95) {
-            this.damagePlayer(18 + this.wave, sx, sy, 'طوفان خلأ');
+          // hurts pilots standing in it
+          for (let i = 0; i < this.fighters.length; i++) {
+            const f = this.fighters[i];
+            if (!f.alive) continue;
+            if (i === 1 && !this.coOp) continue;
+            if (dist2(sx, sy, f.x, f.y) < 95 * 95) {
+              this.damageFighter(i, 18 + this.wave, sx, sy, 'طوفان خلأ');
+            }
           }
           // and melts enemies too — risk/reward kiting
           for (const e of this.enemies) {
@@ -1556,11 +1760,13 @@ export class GameEngine {
   }
 
   private spawnPos(margin = 60): { x: number; y: number } {
+    // co-op spawns ring the midpoint so neither pilot is farmed
+    const focus = this.focusPoint();
     for (let tries = 0; tries < 12; tries++) {
       const a = Math.random() * TAU;
       const rad = Math.max(this.viewW, this.viewH) * 0.62 + rand(0, 220);
-      const x = clamp(this.px + Math.cos(a) * rad, margin, WORLD_W - margin);
-      const y = clamp(this.py + Math.sin(a) * rad, margin, WORLD_H - margin);
+      const x = clamp(focus.x + Math.cos(a) * rad, margin, WORLD_W - margin);
+      const y = clamp(focus.y + Math.sin(a) * rad, margin, WORLD_H - margin);
       const dx = x - (this.camX + this.viewW / 2);
       const dy = y - (this.camY + this.viewH / 2);
       // prefer spawns outside view
@@ -1668,8 +1874,6 @@ export class GameEngine {
   }
 
   private updateEnemies(dt: number): void {
-    const px = this.px;
-    const py = this.py;
     for (const e of this.enemies) {
       e.t += dt;
       e.flash = Math.max(0, e.flash - dt * 5);
@@ -1687,6 +1891,12 @@ export class GameEngine {
       e.kx *= 1 - Math.min(1, dt * 8);
       e.ky *= 1 - Math.min(1, dt * 8);
 
+      // co-op: each enemy hunts its nearest living pilot
+      const tgt = this.coOp
+        ? pickTarget(e.x, e.y, this.fighters[0], this.fighters[1])
+        : this.fighters[0];
+      const px = tgt.x;
+      const py = tgt.y;
       const ang = angleTo(e.x, e.y, px, py);
       const dist = Math.hypot(px - e.x, py - e.y) || 1;
 
@@ -2218,44 +2428,55 @@ export class GameEngine {
 
     if (this.deathT >= 0) return;
 
-    // enemy bullets vs player
+    // enemy bullets vs pilots (each living fighter rolls separately)
     const pr = 13;
     for (const b of this.ebullets) {
       if (b.dead) continue;
       const rr = b.r + pr;
-      if (dist2(b.x, b.y, this.px, this.py) < rr * rr) {
-        b.dead = true;
-        this.damagePlayer(b.dmg, b.x, b.y, 'گلوله دشمن');
+      for (let i = 0; i < this.fighters.length; i++) {
+        const f = this.fighters[i];
+        if (!f.alive) continue;
+        if (i === 1 && !this.coOp) continue;
+        if (dist2(b.x, b.y, f.x, f.y) < rr * rr) {
+          b.dead = true;
+          this.damageFighter(i, b.dmg, b.x, b.y, 'گلوله دشمن');
+          break;
+        }
       }
     }
-    // enemies vs player (only nearby cells around the player)
+    // enemies vs pilots (only nearby cells around each pilot)
     const thorns = thornsDamage(this.taken);
     const diveStacks = this.taken.get('phasedive') ?? 0;
-    const diving = diveStacks > 0 && this.dashT > 0;
-    const diveDmg = diving ? this.stats.damage * (2 + diveStacks) : 0;
-    this.forEachNear(this.px, this.py, diving ? 130 : 96, (e) => {
-      if (e.spawnT > 0) return; // phasing in: harmless
-      // v6 phasedive: dash through enemies to shred them (uses orbHitCd as per-enemy gate)
-      if (diving && e.hp > 0 && e.orbHitCd <= 0) {
-        const drr = e.r + 34;
-        if (dist2(e.x, e.y, this.px, this.py) < drr * drr) {
-          e.orbHitCd = 0.25;
-          this.damageEnemy(e, diveDmg, false, this.dashDx * 500, this.dashDy * 500);
-          this.fx.hitSpark(e.x, e.y, Math.atan2(this.dashDy, this.dashDx), '#5df2ff');
+    for (let i = 0; i < this.fighters.length; i++) {
+      const f = this.fighters[i];
+      if (!f.alive) continue;
+      if (i === 1 && !this.coOp) continue;
+      const diving = diveStacks > 0 && f.dashT > 0;
+      const diveDmg = diving ? this.stats.damage * (2 + diveStacks) : 0;
+      this.forEachNear(f.x, f.y, diving ? 130 : 96, (e) => {
+        if (e.spawnT > 0) return; // phasing in: harmless
+        // v6 phasedive: dash through enemies to shred them (uses orbHitCd as per-enemy gate)
+        if (diving && e.hp > 0 && e.orbHitCd <= 0) {
+          const drr = e.r + 34;
+          if (dist2(e.x, e.y, f.x, f.y) < drr * drr) {
+            e.orbHitCd = 0.25;
+            this.damageEnemy(e, diveDmg, false, f.dashDx * 500, f.dashDy * 500);
+            this.fx.hitSpark(e.x, e.y, Math.atan2(f.dashDy, f.dashDx), '#5df2ff');
+          }
         }
-      }
-      const rr = e.r + pr - 2;
-      if (dist2(e.x, e.y, this.px, this.py) < rr * rr) {
-        this.damagePlayer(e.dmg, e.x, e.y, ENEMY_FA[e.kind]);
-        if (thorns > 0 && e.hp > 0) {
-          this.damageEnemy(e, thorns, false, e.x - this.px, e.y - this.py);
+        const rr = e.r + pr - 2;
+        if (dist2(e.x, e.y, f.x, f.y) < rr * rr) {
+          this.damageFighter(i, e.dmg, e.x, e.y, ENEMY_FA[e.kind]);
+          if (thorns > 0 && e.hp > 0) {
+            this.damageEnemy(e, thorns, false, e.x - f.x, e.y - f.y);
+          }
+          // push enemy back a bit so it doesn't stick
+          const a = angleTo(f.x, f.y, e.x, e.y);
+          e.kx += Math.cos(a) * 180;
+          e.ky += Math.sin(a) * 180;
         }
-        // push enemy back a bit so it doesn't stick
-        const a = angleTo(this.px, this.py, e.x, e.y);
-        e.kx += Math.cos(a) * 180;
-        e.ky += Math.sin(a) * 180;
-      }
-    });
+      });
+    }
     this.sweepDeadBullets(this.ebullets);
     // thorns may have killed enemies — sweep again
     this.sweepDeadEnemies();
@@ -2437,8 +2658,9 @@ export class GameEngine {
       this.hp = Math.min(this.stats.maxHp, this.hp + 8);
       const hype = this.combo >= 100 ? `🔥🔥 کمبو ×${this.combo} افسانه‌ای! +${bonus}` : this.combo >= 50 ? `🔥 کمبو ×${this.combo}! +${bonus}` : `کمبو ×${this.combo}! +${bonus}`;
       this.setAnnounce(hype, 2);
-      this.fx.text(this.px, this.py - 34, `COMBO x${this.combo}  +8 HP`, '#ffd319', 22);
-      this.fx.shockwave(this.px, this.py, '#ffd319', 160, 0.5, 5);
+      const cb = this.celebrate();
+      this.fx.text(cb.x, cb.y - 34, `COMBO x${this.combo}  +8 HP`, '#ffd319', 22);
+      this.fx.shockwave(cb.x, cb.y, '#ffd319', 160, 0.5, 5);
       this.audio.comboTick(this.combo + 10);
     }
   }
@@ -2476,14 +2698,23 @@ export class GameEngine {
       p.y += p.vy * dt;
       p.vx *= 1 - Math.min(1, dt * 2);
       p.vy *= 1 - Math.min(1, dt * 2);
-      const d2 = dist2(p.x, p.y, this.px, this.py);
-      const pullR = this.magnetAllT > 0 ? 1200 : this.stats.magnet;
-      if (d2 < pullR * pullR) {
-        const d = Math.sqrt(d2) || 1;
-        p.vx += ((this.px - p.x) / d) * 1400 * dt;
-        p.vy += ((this.py - p.y) / d) * 1400 * dt;
+      // magnet to / collected by the nearest living pilot
+      let bd = Infinity;
+      let best: Fighter | null = null;
+      for (const f of this.activeFighters()) {
+        const d2 = dist2(p.x, p.y, f.x, f.y);
+        if (d2 < bd) {
+          bd = d2;
+          best = f;
+        }
       }
-      if (d2 < 30 * 30) {
+      const pullR = this.magnetAllT > 0 ? 1200 : this.stats.magnet;
+      if (best && bd < pullR * pullR) {
+        const d = Math.sqrt(bd) || 1;
+        p.vx += ((best.x - p.x) / d) * 1400 * dt;
+        p.vy += ((best.y - p.y) / d) * 1400 * dt;
+      }
+      if (bd < 30 * 30) {
         p.life = -1;
         this.collectPowerup(p.kind);
       }
@@ -2558,25 +2789,39 @@ export class GameEngine {
     this.setAnnounce('انفجار هسته‌ای!', 2, 2);
   }
 
+  /** living pilots for shared auras — P1 alone in solo */
+  private activeFighters(): Fighter[] {
+    if (!this.coOp) return this.fighters[0].alive ? [this.fighters[0]] : [];
+    return this.fighters.filter((f) => f.alive);
+  }
+
+  /** celebration fx anchor — first living pilot (P1 in solo) */
+  private celebrate(): Fighter {
+    const alive = this.activeFighters();
+    return alive.length > 0 ? alive[0] : this.fighters[0];
+  }
+
   private updateOrbitals(dt: number): void {
     void dt;
     const n = this.stats.orbitals;
     if (n <= 0 || this.deathT >= 0) return;
     const R = 74;
     const dmg = this.stats.damage * this.stats.orbitalDamage;
-    for (let i = 0; i < n; i++) {
-      const a = this.orbitalAngle + (i / n) * TAU;
-      const ox = this.px + Math.cos(a) * R;
-      const oy = this.py + Math.sin(a) * R;
-      this.forEachNear(ox, oy, 96, (e) => {
-        if (e.hp <= 0 || e.spawnT > 0 || e.orbHitCd > 0) return;
-        const rr = e.r + 13;
-        if (dist2(ox, oy, e.x, e.y) < rr * rr) {
-          e.orbHitCd = 0.35;
-          const ka = angleTo(e.x, e.y, ox, oy);
-          this.damageEnemy(e, dmg, false, Math.cos(ka) * 300, Math.sin(ka) * 300);
-        }
-      });
+    for (const f of this.activeFighters()) {
+      for (let i = 0; i < n; i++) {
+        const a = this.orbitalAngle + (i / n) * TAU;
+        const ox = f.x + Math.cos(a) * R;
+        const oy = f.y + Math.sin(a) * R;
+        this.forEachNear(ox, oy, 96, (e) => {
+          if (e.hp <= 0 || e.spawnT > 0 || e.orbHitCd > 0) return;
+          const rr = e.r + 13;
+          if (dist2(ox, oy, e.x, e.y) < rr * rr) {
+            e.orbHitCd = 0.35;
+            const ka = angleTo(e.x, e.y, ox, oy);
+            this.damageEnemy(e, dmg, false, Math.cos(ka) * 300, Math.sin(ka) * 300);
+          }
+        });
+      }
     }
     // cleanup orbital kills immediately so blades feel responsive
     this.sweepDeadEnemies();
@@ -2592,18 +2837,20 @@ export class GameEngine {
         this.novaCd = Math.max(3.2, 7.5 - novaStacks * 1.1);
         const n = 10 + 4 * novaStacks;
         const dmg = this.stats.damage * (1.25 + 0.15 * novaStacks);
-        for (let i = 0; i < n; i++) {
-          const a = (i / n) * TAU + rand(-0.06, 0.06);
-          const b = this.allocBullet(true);
-          b.x = this.px; b.y = this.py;
-          b.vx = Math.cos(a) * 560; b.vy = Math.sin(a) * 560;
-          b.r = 5; b.dmg = dmg * rand(0.9, 1.1);
-          b.pierce = 2; b.life = 0.9; b.crit = false;
-          b.tint = '#ff9f1c';
-          this.bullets.push(b);
+        for (const f of this.activeFighters()) {
+          for (let i = 0; i < n; i++) {
+            const a = (i / n) * TAU + rand(-0.06, 0.06);
+            const b = this.allocBullet(true);
+            b.x = f.x; b.y = f.y;
+            b.vx = Math.cos(a) * 560; b.vy = Math.sin(a) * 560;
+            b.r = 5; b.dmg = dmg * rand(0.9, 1.1);
+            b.pierce = 2; b.life = 0.9; b.crit = false;
+            b.tint = '#ff9f1c';
+            this.bullets.push(b);
+          }
+          this.fx.shockwave(f.x, f.y, '#ff9f1c', 220, 0.5, 6);
+          this.fx.explosion(f.x, f.y, '#ff9f1c', 10, 300);
         }
-        this.fx.shockwave(this.px, this.py, '#ff9f1c', 220, 0.5, 6);
-        this.fx.explosion(this.px, this.py, '#ff9f1c', 10, 300);
         this.audio.nova();
         this.trauma = Math.min(1, this.trauma + 0.15);
       }
@@ -2615,20 +2862,22 @@ export class GameEngine {
         this.seekerCd = Math.max(1.2, 2.8 - 0.4 * seekerStacks);
         // v3.2: 3+ stacks fire a twin volley — seeker fantasy finally pays off
         const volley = seekerStacks >= 3 ? 2 : 1;
-        for (let v = 0; v < volley; v++) {
-          const tgt = this.nearestEnemy(1200);
-          const a = tgt
-            ? angleTo(this.px, this.py, tgt.x, tgt.y) + (volley > 1 ? (v === 0 ? -0.18 : 0.18) : 0)
-            : this.aim;
-          const b = this.allocBullet(true);
-          b.x = this.px; b.y = this.py;
-          b.vx = Math.cos(a) * 680; b.vy = Math.sin(a) * 680;
-          b.r = 6; b.dmg = this.stats.damage * 1.6 * seekerStacks;
-          b.pierce = 0; b.life = 3; b.crit = true;
-          b.homing = true; b.tint = '#ff9f1c';
-          this.bullets.push(b);
+        for (const f of this.activeFighters()) {
+          for (let v = 0; v < volley; v++) {
+            const tgt = this.nearestEnemyFrom(f.x, f.y, 1200);
+            const a = tgt
+              ? angleTo(f.x, f.y, tgt.x, tgt.y) + (volley > 1 ? (v === 0 ? -0.18 : 0.18) : 0)
+              : f.aim;
+            const b = this.allocBullet(true);
+            b.x = f.x; b.y = f.y;
+            b.vx = Math.cos(a) * 680; b.vy = Math.sin(a) * 680;
+            b.r = 6; b.dmg = this.stats.damage * 1.6 * seekerStacks;
+            b.pierce = 0; b.life = 3; b.crit = true;
+            b.homing = true; b.tint = '#ff9f1c';
+            this.bullets.push(b);
+          }
+          this.fx.muzzle(f.x, f.y, f.aim, '#ff9f1c');
         }
-        this.fx.muzzle(this.px, this.py, this.aim, '#ff9f1c');
         this.audio.shoot();
       }
     }
@@ -2638,11 +2887,14 @@ export class GameEngine {
       this.chainCd -= dt;
       if (this.chainCd <= 0) {
         this.chainCd = Math.max(2.2, 4.2 - chainStacks * 0.5);
-        const targets = this.nearestEnemies(this.px, this.py, 620, 3 + chainStacks * 2);
-        if (targets.length > 0) {
+        let zapped = false;
+        for (const f of this.activeFighters()) {
+          const targets = this.nearestEnemies(f.x, f.y, 620, 3 + chainStacks * 2);
+          if (targets.length === 0) continue;
+          zapped = true;
           const dmg = this.stats.damage * (1.6 + chainStacks * 0.7);
-          let px = this.px;
-          let py = this.py;
+          let px = f.x;
+          let py = f.y;
           for (const tgt of targets) {
             this.fx.shockwave(tgt.x, tgt.y, '#5df2ff', 70, 0.3, 4);
             this.fx.explosion(tgt.x, tgt.y, '#5df2ff', 8, 320);
@@ -2652,6 +2904,8 @@ export class GameEngine {
             px = tgt.x;
             py = tgt.y;
           }
+        }
+        if (zapped) {
           this.audio.nova();
           if (!this.reducedMotion) this.trauma = Math.min(1, this.trauma + 0.12);
           this.sweepDeadEnemies();
@@ -2665,54 +2919,68 @@ export class GameEngine {
   /** k nearest live enemies for chain lightning (simple insertion, n is tiny) */
 
   private damagePlayer(raw: number, fromX: number, fromY: number, source: string | null = null): void {
-    if (this.invuln > 0 || this.dashT > 0 || this.deathT >= 0 || this.victoryT >= 0) return;
+    this.damageFighter(0, raw, fromX, fromY, source);
+  }
+
+  /** damage one pilot; solo always hits index 0 (identical to the old code) */
+  private damageFighter(idx: number, raw: number, fromX: number, fromY: number, source: string | null = null): void {
+    const f = this.fighters[idx];
+    if (!f.alive || f.invuln > 0 || f.dashT > 0 || this.deathT >= 0 || this.victoryT >= 0) return;
     if (this.shieldT > 0 || this.phaseT > 0) {
       // shield / phase ghost absorbs the hit with a spark
       const col = this.phaseT > 0 ? '#e2e8f0' : '#00e5ff';
-      this.invuln = 0.4;
-      this.fx.shockwave(this.px, this.py, col, 90, 0.3, 3);
-      this.fx.pickupBurst(this.px, this.py, col);
+      f.invuln = 0.4;
+      this.fx.shockwave(f.x, f.y, col, 90, 0.3, 3);
+      this.fx.pickupBurst(f.x, f.y, col);
       return;
     }
     const dmg = Math.max(1, raw - this.stats.armor);
-    this.hp -= dmg;
+    f.hp -= dmg;
     if (source) this.deathBy = source;
     if (this.boss) this.bossDamageTaken = true;
-    this.invuln = 0.55;
+    f.invuln = 0.55;
     this.combo = 0;
     this.comboT = 0;
-    this.hurtFlash = 0.25;
+    f.hurtFlash = 0.25;
     this.audio.hurt();
     this.trauma = Math.min(1, this.trauma + 0.5);
-    this.fx.explosion(this.px, this.py, '#ff2d78', 14, 300);
-    this.fx.text(this.px, this.py - 26, `-${Math.round(dmg)}`, '#ff5d7e', 16);
-    const a = angleTo(fromX, fromY, this.px, this.py);
-    this.pvx += Math.cos(a) * 260;
-    this.pvy += Math.sin(a) * 260;
-    if (this.hp <= 0) {
+    this.fx.explosion(f.x, f.y, '#ff2d78', 14, 300);
+    this.fx.text(f.x, f.y - 26, `-${Math.round(dmg)}`, '#ff5d7e', 16);
+    const a = angleTo(fromX, fromY, f.x, f.y);
+    f.vx += Math.cos(a) * 260;
+    f.vy += Math.sin(a) * 260;
+    if (f.hp <= 0) {
       // v3 Second Wind: cheat death — 2 stacks = shorter cd + bigger heal
       const sw = this.taken.get('secondwind') ?? 0;
       if (sw > 0 && this.swCd <= 0) {
         this.swCd = sw >= 2 ? 60 : 85;
-        this.hp = Math.round(this.stats.maxHp * (sw >= 2 ? 0.45 : 0.32));
-        this.invuln = 2;
+        f.hp = Math.round(this.stats.maxHp * (sw >= 2 ? 0.45 : 0.32));
+        f.invuln = 2;
         this.trauma = 1;
         this.slowmoT = Math.max(this.slowmoT, 0.8);
-        this.fx.shockwave(this.px, this.py, '#ffffff', 320, 0.9, 7);
-        this.fx.explosion(this.px, this.py, '#3dff8e', 60, 480);
+        this.fx.shockwave(f.x, f.y, '#ffffff', 320, 0.9, 7);
+        this.fx.explosion(f.x, f.y, '#3dff8e', 60, 480);
         this.audio.secondWind();
-        this.setAnnounce('💚 فرصت دوباره! (Second Wind)', 2.4, 3);
+        this.setAnnounce(`💚 فرصت دوباره! (Second Wind)${this.coOp ? ` — بازیکن ${idx + 1}` : ''}`, 2.4, 3);
         this.grantAchievement('second_wind');
         this.emitHud();
         return;
       }
-      this.hp = 0;
-      this.deathT = 0;
+      f.hp = 0;
+      f.alive = false;
+      const partnerAlive = this.coOp && this.fighters[1 - idx].alive;
+      if (partnerAlive) {
+        this.setAnnounce(`💀 بازیکن ${idx + 1} افتاد! موج را تمام کن تا برگردد`, 2.6, 3);
+        this.fx.explosion(f.x, f.y, '#ffffff', 40, 420);
+        this.emitHud();
+        return;
+      }
       this.slowmoT = 1.0;
+      this.deathT = 0;
       this.trauma = 1;
-      this.fx.explosion(this.px, this.py, '#00f0ff', 80, 560);
-      this.fx.explosion(this.px, this.py, '#ff2d78', 60, 420);
-      this.fx.shockwave(this.px, this.py, '#ffffff', 320, 0.9, 7);
+      this.fx.explosion(f.x, f.y, '#00f0ff', 80, 560);
+      this.fx.explosion(f.x, f.y, '#ff2d78', 60, 420);
+      this.fx.shockwave(f.x, f.y, '#ffffff', 320, 0.9, 7);
     }
     this.emitHud();
   }
@@ -2733,11 +3001,12 @@ export class GameEngine {
       this.audio.levelup();
       // v7 level-up celebration: beam + confetti + breather heal
       this.hp = Math.min(this.stats.maxHp, this.hp + 10);
-      this.fx.shockwave(this.px, this.py, '#a3ff12', 240, 0.6, 6);
-      this.fx.shockwave(this.px, this.py, '#ffffff', 130, 0.4, 3);
-      this.fx.explosion(this.px, this.py, '#a3ff12', 28, 420);
-      this.fx.confetti(this.px, this.py, 24);
-      this.fx.text(this.px, this.py - 40, `LEVEL ${this.level}!  +10 HP`, '#a3ff12', 22);
+      const lc = this.celebrate();
+      this.fx.shockwave(lc.x, lc.y, '#a3ff12', 240, 0.6, 6);
+      this.fx.shockwave(lc.x, lc.y, '#ffffff', 130, 0.4, 3);
+      this.fx.explosion(lc.x, lc.y, '#a3ff12', 28, 420);
+      this.fx.confetti(lc.x, lc.y, 24);
+      this.fx.text(lc.x, lc.y - 40, `LEVEL ${this.level}!  +10 HP`, '#a3ff12', 22);
       this.cb.onLevelUp(rollUpgrades(this.taken, 3));
       this.emitHud();
     }
@@ -2746,20 +3015,30 @@ export class GameEngine {
   private updateGems(dt: number): void {
     const magnetR = this.magnetAllT > 0 ? 1200 : this.stats.magnet;
     const magnetR2 = magnetR * magnetR;
+    const pilots = this.activeFighters();
     for (const g of this.gems) {
       g.t += dt;
       g.x += g.vx * dt;
       g.y += g.vy * dt;
       g.vx *= 1 - Math.min(1, dt * 3);
       g.vy *= 1 - Math.min(1, dt * 3);
-      const d2 = dist2(g.x, g.y, this.px, this.py);
-      if (d2 < magnetR2) {
-        const d = Math.sqrt(d2) || 1;
-        const pull = 900 * (1 - d / (magnetR + 1)) + 260;
-        g.vx += ((this.px - g.x) / d) * pull * dt * 4;
-        g.vy += ((this.py - g.y) / d) * pull * dt * 4;
+      // co-op: gems magnet to / are collected by the nearest living pilot
+      let bd = magnetR2;
+      let best: Fighter | null = null;
+      for (const f of pilots) {
+        const d2 = dist2(g.x, g.y, f.x, f.y);
+        if (d2 < bd) {
+          bd = d2;
+          best = f;
+        }
       }
-      if (d2 < 30 * 30) {
+      if (best) {
+        const d = Math.sqrt(bd) || 1;
+        const pull = 900 * (1 - d / (magnetR + 1)) + 260;
+        g.vx += ((best.x - g.x) / d) * pull * dt * 4;
+        g.vy += ((best.y - g.y) / d) * pull * dt * 4;
+      }
+      if (bd < 30 * 30) {
         g.t = -999; // collected marker
         this.addXp(this.greedT > 0 ? g.val * 2 : g.val);
         this.score += this.greedT > 0 ? 10 : 5;
@@ -2785,17 +3064,30 @@ export class GameEngine {
     sweep(this.gems, (g) => g.t > -100);
   }
 
+  /** camera focus: P1 lookahead solo, living-pilots midpoint in co-op */
+  private focusPoint(): { x: number; y: number; lookX: number; lookY: number } {
+    if (!this.coOp) {
+      return {
+        x: this.px, y: this.py,
+        lookX: Math.cos(this.aim) * 52 + this.pvx * 0.1 + this.dashKickX,
+        lookY: Math.sin(this.aim) * 52 + this.pvy * 0.1 + this.dashKickY,
+      };
+    }
+    const alive = this.fighters.filter((f) => f.alive);
+    if (alive.length === 0) return { x: this.px, y: this.py, lookX: 0, lookY: 0 };
+    const x = alive.reduce((s, f) => s + f.x, 0) / alive.length;
+    const y = alive.reduce((s, f) => s + f.y, 0) / alive.length;
+    return { x, y, lookX: 0, lookY: 0 };
+  }
+
   private updateCamera(dt: number): void {
     // v4 lookahead: the camera leans toward aim + velocity + dash kick,
     // so the player sees where they're going instead of where they've been
     this.dashKickX *= 1 - Math.min(1, dt * 5);
     this.dashKickY *= 1 - Math.min(1, dt * 5);
-    const lookX =
-      Math.cos(this.aim) * 52 + this.pvx * 0.1 + this.dashKickX;
-    const lookY =
-      Math.sin(this.aim) * 52 + this.pvy * 0.1 + this.dashKickY;
-    const tx = clamp(this.px + lookX - this.viewW / 2, 0, Math.max(0, WORLD_W - this.viewW));
-    const ty = clamp(this.py + lookY - this.viewH / 2, 0, Math.max(0, WORLD_H - this.viewH));
+    const focus = this.focusPoint();
+    const tx = clamp(focus.x + focus.lookX - this.viewW / 2, 0, Math.max(0, WORLD_W - this.viewW));
+    const ty = clamp(focus.y + focus.lookY - this.viewH / 2, 0, Math.max(0, WORLD_H - this.viewH));
     // if world smaller than view, center
     const cx = WORLD_W < this.viewW ? (WORLD_W - this.viewW) / 2 : tx;
     const cy = WORLD_H < this.viewH ? (WORLD_H - this.viewH) / 2 : ty;
@@ -2961,10 +3253,11 @@ export class GameEngine {
 
     // orbital blades — blazing gold with motion streaks (streak only on high)
     if (this.stats.orbitals > 0 && this.deathT < 0) {
+      for (const f of this.activeFighters()) {
       for (let i = 0; i < this.stats.orbitals; i++) {
         const a = this.orbitalAngle + (i / this.stats.orbitals) * TAU;
-        const ox = this.px + Math.cos(a) * 74;
-        const oy = this.py + Math.sin(a) * 74;
+        const ox = f.x + Math.cos(a) * 74;
+        const oy = f.y + Math.sin(a) * 74;
         if (q <= 2) drawGlow(ctx, '#ffd319', ox, oy, 26, 0.75);
         ctx.save();
         ctx.translate(ox, oy);
@@ -2987,6 +3280,7 @@ export class GameEngine {
         ctx.closePath();
         ctx.fill();
         ctx.restore();
+      }
       }
     }
 
@@ -3026,9 +3320,10 @@ export class GameEngine {
     }
     ctx.restore();
 
-    // player
+    // pilots (P2 only in co-op)
     if (this.deathT < 0) {
-      this.drawPlayer(ctx);
+      this.drawPlayer(ctx, 0);
+      if (this.coOp && this.fighters[1].alive) this.drawPlayer(ctx, 1);
     }
 
     // v6 voidstorm telegraph ring (world space, before particles)
@@ -3066,7 +3361,7 @@ export class GameEngine {
     }
 
     // low hp — urgent red breath + heartbeat pulse (static on potato)
-    const hpFrac = this.hp / this.stats.maxHp;
+    const hpFrac = this.lowestHpFrac();
     if (hpFrac < 0.35 && this.deathT < 0) {
       const beat = q >= 3 ? 0.5 : Math.sin(nowMs / 300) * 0.5 + 0.5;
       const a = (0.35 - hpFrac) * 1.4 + beat * 0.06;
@@ -3155,27 +3450,28 @@ export class GameEngine {
     return '#00f0ff';
   }
 
-  private drawPlayer(ctx: CanvasRenderingContext2D): void {
-    const col = this.shipColor();
+  private drawPlayer(ctx: CanvasRenderingContext2D, fi: number): void {
+    const f = this.fighters[fi];
+    const col = fi === 0 ? this.shipColor() : '#ffffff';
     const now = this.renderNow || performance.now();
-    const speedGlow = Math.min(0.35, Math.hypot(this.pvx, this.pvy) / 2200);
+    const speedGlow = Math.min(0.35, Math.hypot(f.vx, f.vy) / 2200);
     // potato: single glow instead of double (fill-rate)
-    if (this.quality >= 3) drawGlow(ctx, col, this.px, this.py, 36, 0.55);
+    if (this.quality >= 3) drawGlow(ctx, col, f.x, f.y, 36, 0.55);
     else {
-      drawGlow(ctx, col, this.px, this.py, 44, 0.6 + speedGlow);
-      drawGlow(ctx, '#ffffff', this.px, this.py, 18, 0.25);
+      drawGlow(ctx, col, f.x, f.y, 44, 0.6 + speedGlow);
+      drawGlow(ctx, '#ffffff', f.x, f.y, 18, 0.25);
     }
     ctx.save();
-    ctx.translate(this.px, this.py);
+    ctx.translate(f.x, f.y);
     if (this.overdriveT > 0) {
       ctx.fillStyle = 'rgba(255,220,120,0.08)';
       ctx.beginPath();
       ctx.arc(0, 0, 34 + Math.sin(now / 140) * 3, 0, TAU);
       ctx.fill();
     }
-    ctx.rotate(this.aim);
+    ctx.rotate(f.aim);
     // engine flame — shorter, softer
-    const flame = 9 + Math.sin(now / 70) * 2.5 + Math.hypot(this.pvx, this.pvy) / 90;
+    const flame = 9 + Math.sin(now / 70) * 2.5 + Math.hypot(f.vx, f.vy) / 90;
     ctx.fillStyle = 'rgba(255,170,80,0.28)';
     ctx.beginPath();
     ctx.moveTo(-11, 8);
@@ -3218,28 +3514,28 @@ export class GameEngine {
     ctx.beginPath();
     ctx.arc(3.5, 0, 2.6, 0, TAU);
     ctx.fill();
-    if (this.hurtFlash > 0) {
+    if (f.hurtFlash > 0) {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      drawGlow(ctx, '#ffffff', 0, 0, 26, Math.min(0.7, this.hurtFlash * 3));
+      drawGlow(ctx, '#ffffff', 0, 0, 26, Math.min(0.7, f.hurtFlash * 3));
       ctx.restore();
     }
     ctx.restore();
 
     // energy shield — thin double ring
     if (this.shieldT > 0) {
-      if (this.quality <= 2) drawGlow(ctx, '#7deeff', this.px, this.py, 36, 0.35);
+      if (this.quality <= 2) drawGlow(ctx, '#7deeff', f.x, f.y, 36, 0.35);
       ctx.save();
       ctx.globalAlpha = 0.5 + Math.sin(now / 160) * 0.1;
       ctx.strokeStyle = '#a8ecff';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(this.px, this.py, 28, 0, TAU);
+      ctx.arc(f.x, f.y, 28, 0, TAU);
       ctx.stroke();
       ctx.globalAlpha = 0.08;
       ctx.fillStyle = '#a8ecff';
       ctx.beginPath();
-      ctx.arc(this.px, this.py, 28, 0, TAU);
+      ctx.arc(f.x, f.y, 28, 0, TAU);
       ctx.fill();
       ctx.restore();
     }
@@ -3253,20 +3549,30 @@ export class GameEngine {
       ctx.setLineDash([4, 5]);
       ctx.lineDashOffset = -now / 90;
       ctx.beginPath();
-      ctx.arc(this.px, this.py, 30, 0, TAU);
+      ctx.arc(f.x, f.y, 30, 0, TAU);
       ctx.stroke();
       ctx.restore();
     }
 
     // i-frame ring
-    if (this.invuln > 0 || this.dashT > 0) {
+    if (f.invuln > 0 || f.dashT > 0) {
       ctx.save();
-      ctx.globalAlpha = clamp(this.invuln * 1.6, 0.12, 0.5);
-      ctx.strokeStyle = this.dashT > 0 ? '#ffffff' : '#a8ecff';
+      ctx.globalAlpha = clamp(f.invuln * 1.6, 0.12, 0.5);
+      ctx.strokeStyle = f.dashT > 0 ? '#ffffff' : '#a8ecff';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(this.px, this.py, 21 + Math.sin(now / 100) * 1.5, 0, TAU);
+      ctx.arc(f.x, f.y, 21 + Math.sin(now / 100) * 1.5, 0, TAU);
       ctx.stroke();
+      ctx.restore();
+    }
+      // co-op pilot tag
+    if (this.coOp) {
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+      ctx.font = '700 11px Vazirmatn, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = fi === 0 ? '#a8ecff' : '#ffd7e4';
+      ctx.fillText(fi === 0 ? '۱' : '۲', f.x, f.y - 26);
       ctx.restore();
     }
   }
@@ -3300,7 +3606,8 @@ export class GameEngine {
     ctx.save();
     ctx.globalAlpha = dim;
     ctx.translate(e.x, e.y);
-    const face = angleTo(e.x, e.y, this.px, this.py);
+    const hunter = this.coOp ? pickTarget(e.x, e.y, this.fighters[0], this.fighters[1]) : this.fighters[0];
+    const face = angleTo(e.x, e.y, hunter.x, hunter.y);
     ctx.rotate(e.kind === 'shooter' || isBossKind(e.kind) || e.kind === 'sniper' || e.kind === 'lancer' || e.kind === 'stinger' || e.kind === 'tesla' || e.kind === 'tempest' ? face : face + e.t * 0.6);
     // hit squash — the hull pops on impact, then settles (flash decays 5/s)
     const squash = 1 + Math.min(0.16, e.flash * 0.16);
@@ -3769,6 +4076,31 @@ export class GameEngine {
       ctx.fill();
       ctx.restore();
       drawn++;
+    }
+    // co-op: partner arrow when P2 is offscreen (relative to P1's view center)
+    if (this.coOp && this.fighters[1].alive) {
+      const q = this.fighters[1];
+      if (q.x < camX || q.x > camX + this.viewW || q.y < camY || q.y > camY + this.viewH) {
+        const cx = clamp(q.x, x0, x1);
+        const cy = clamp(q.y, y0, y1);
+        const a = Math.atan2(q.y - this.py, q.x - this.px);
+        ctx.save();
+        ctx.translate(cx - camX, cy - camY);
+        ctx.rotate(a);
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '700 13px Vazirmatn, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('۲', 0, -12);
+        ctx.globalAlpha = 0.6;
+        ctx.beginPath();
+        ctx.moveTo(8, 0);
+        ctx.lineTo(-5, 6);
+        ctx.lineTo(-5, -6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
     }
   }
 

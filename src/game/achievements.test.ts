@@ -14,7 +14,7 @@ describe('achievements catalog', () => {
   });
 
   it('covers the v6/v7 systems', () => {
-    for (const id of ['endless1', 'chainlord', 'stinger15', 'stormrider', 'greed_is_good', 'untouchable']) {
+    for (const id of ['endless1', 'chainlord', 'stinger15', 'stormrider', 'greed_is_good', 'untouchable', 'blood_brothers']) {
       expect(achievementDef(id)).toBeDefined();
     }
   });

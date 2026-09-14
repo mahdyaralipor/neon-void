@@ -17,6 +17,7 @@ export interface BoardEntry {
   time: number;
   ship: ShipId;
   date: number;
+  coOp?: boolean;
 }
 
 export interface Totals {
@@ -185,6 +186,8 @@ export interface SavedSettings {
   shake: boolean;
   muted: boolean;
   ship: ShipId;
+  /** local co-op: P2 (arrows + Enter) shares the run — needs a keyboard */
+  coOp: boolean;
   musicVol: number; // 0..1
   sfxVol: number; // 0..1
   autoQuality: boolean;
@@ -200,6 +203,7 @@ export const DEFAULT_SETTINGS: SavedSettings = {
   shake: true,
   muted: false,
   ship: 'vanguard',
+  coOp: false,
   musicVol: 0.8,
   sfxVol: 1,
   autoQuality: true,

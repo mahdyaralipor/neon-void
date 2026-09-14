@@ -29,6 +29,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'boss_trio', nameFa: 'سه‌تاج', nameEn: 'TRIPLE CROWN', descFa: 'شکست هر سه باس', icon: 'crown' },
   { id: 'greed_is_good', nameFa: 'طمع خوب است', nameEn: 'GREED IS GOOD', descFa: 'اولین طمع طلایی', icon: 'gem' },
   { id: 'untouchable', nameFa: 'دست‌نیافتنی', nameEn: 'UNTOUCHABLE', descFa: 'اولین فاز شبح', icon: 'ghost' },
+  { id: 'blood_brothers', nameFa: 'برادران خون', nameEn: 'BLOOD BROTHERS', descFa: 'موج ۱۰ دونفره', icon: 'medal' },
 ];
 
 const KEY = 'neon-void-achievements-v1';

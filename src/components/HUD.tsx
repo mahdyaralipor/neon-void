@@ -97,6 +97,7 @@ export default function HUD({ hud, muted, showFps, gameSpeed, onPause, onMute, o
             </span>
             <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-300">
               <Star size={12} className="text-amber-200" fill="currentColor" /> لول {hud.level}
+              {hud.p2 && <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-black text-slate-200" dir="ltr">P1</span>}
             </span>
           </div>
           <div className="bar-shimmer mt-2 h-2.5 overflow-hidden rounded-full bg-white/[0.07] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]">
@@ -187,6 +188,26 @@ export default function HUD({ hud, muted, showFps, gameSpeed, onPause, onMute, o
               )}
             </div>
           )}
+          {hud.p2 && (
+            <div className="mt-2.5 border-t border-white/[0.07] pt-2.5">
+              <div className="flex items-center justify-between">
+                <span className="tabular inline-flex items-center gap-1.5 text-[12px] font-extrabold text-slate-100" dir="ltr">
+                  <Heart size={13} className={hud.p2.hp / Math.max(1, hud.p2.maxHp) < 0.3 ? 'animate-pulse text-rose-400' : 'text-slate-300'} fill={hud.p2.alive ? 'none' : 'currentColor'} />
+                  {hud.p2.alive ? (<>{hud.p2.hp}<span className="font-medium text-slate-500">/{hud.p2.maxHp}</span></>) : '💀'}
+                </span>
+                <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-black text-slate-200" dir="ltr">P2</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.07]">
+                <div
+                  className="h-full rounded-full bg-gradient-to-l from-slate-100 to-slate-400 transition-[width] duration-200"
+                  style={{ width: `${Math.max(0, hud.p2.hp / Math.max(1, hud.p2.maxHp)) * 100}%` }}
+                />
+              </div>
+              {!hud.p2.alive && (
+                <div className="mt-1.5 text-[10px] font-bold text-slate-500">برمی‌گردد سر موج بعد…</div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col items-center gap-1.5">
@@ -265,7 +286,10 @@ export default function HUD({ hud, muted, showFps, gameSpeed, onPause, onMute, o
             </button>
           </div>
           <div className="hidden sm:block">
-            <Minimap dots={hud.dots} px={hud.px} py={hud.py} />
+            <Minimap
+              dots={hud.dots}
+              players={hud.p2 && hud.p2.alive ? [{ x: hud.px, y: hud.py }, { x: hud.p2.x, y: hud.p2.y }] : [{ x: hud.px, y: hud.py }]}
+            />
           </div>
         </div>
       </div>

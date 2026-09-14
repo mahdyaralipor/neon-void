@@ -4,8 +4,7 @@ import { WORLD_W, WORLD_H } from '../game/engine';
 
 interface Props {
   dots: MinimapDot[];
-  px: number;
-  py: number;
+  players: { x: number; y: number }[];
 }
 
 const DOT_COLOR: Record<string, string> = {
@@ -33,7 +32,7 @@ const DOT_COLOR: Record<string, string> = {
 const W = 132;
 const H = 102;
 
-export default function Minimap({ dots, px, py }: Props) {
+export default function Minimap({ dots, players }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   // prop-driven redraw (was: always-on 60fps rAF loop) + DPR-sharp canvas
@@ -64,16 +63,18 @@ export default function Minimap({ dots, px, py }: Props) {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
-    // player dot — soft white core
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.beginPath();
-    ctx.arc(px * sx, py * sy, 2.4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
-    ctx.beginPath();
-    ctx.arc(px * sx, py * sy, 5, 0, Math.PI * 2);
-    ctx.fill();
-  }, [dots, px, py]);
+    // pilot dots — soft white cores (P1 + P2 in co-op)
+    for (const pl of players) {
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.beginPath();
+      ctx.arc(pl.x * sx, pl.y * sy, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.beginPath();
+      ctx.arc(pl.x * sx, pl.y * sy, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }, [dots, players]);
 
   return (
     <canvas

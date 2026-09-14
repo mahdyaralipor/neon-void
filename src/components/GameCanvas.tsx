@@ -42,6 +42,7 @@ export default function GameCanvas({ settings, meta, checkpoint, paused, callbac
       speed: settings.gameSpeed,
       showDamageNumbers: settings.showDamageNumbers,
       checkpoint: checkpoint ?? null,
+      coOp: settings.coOp === true,
     };
     const engine = new GameEngine(canvas, stable, opts);
     engineRef.current = engine;

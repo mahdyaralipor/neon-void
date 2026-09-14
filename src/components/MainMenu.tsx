@@ -47,6 +47,7 @@ interface Props {
   onOpenLab: () => void;
   onToggleMute: () => void;
   onSelectShip: (s: ShipId) => void;
+  onToggleCoop: () => void;
 }
 
 const DIFF_FA: Record<string, string> = {
@@ -88,11 +89,19 @@ function ShipMeters({ s }: { s: ShipDef }) {
   );
 }
 
-export default function MainMenu({ best, board, totals, settings, shards, meta, onPlay, onOpenSettings, onOpenLab, onToggleMute, onSelectShip }: Props) {
+export default function MainMenu({ best, board, totals, settings, shards, meta, onPlay, onOpenSettings, onOpenLab, onToggleMute, onSelectShip, onToggleCoop }: Props) {
   const unlocked = useMemo(() => getUnlockedAchievements(), []);
   const runs = useMemo(() => getRuns(), []);
   const metaTotal = meta.dmg + meta.hp + meta.speed + meta.xp;
   const codexKinds = useMemo(() => Object.keys(ENEMY_COLOR) as EnemyKind[], []);
+  // co-op needs a physical keyboard — P2 flies with arrows + Enter
+  const coarsePointer = useMemo(() => {
+    try {
+      return window.matchMedia?.('(pointer: coarse)').matches ?? false;
+    } catch {
+      return false;
+    }
+  }, []);
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12">
       <MenuBackdrop />
@@ -217,13 +226,45 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
           </div>
         </div>
 
+        <div className="glass mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3.5 text-right">
+          <div className="flex items-center gap-3">
+            <span className="rounded-xl bg-white/[0.05] p-2.5 text-slate-300">
+              <Gamepad2 size={18} />
+            </span>
+            <div>
+              <div className="text-[13px] font-extrabold text-white">حالت بازی</div>
+              <div className="text-[11px] text-slate-500">
+                {coarsePointer
+                  ? 'دونفره به کیبورد فیزیکی نیاز دارد'
+                  : settings.coOp ? 'دونفره: P1 موس+WASD · P2 جهت‌نما+Enter' : 'تکنفره: WASD + موس'}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2" dir="ltr">
+            <button
+              onClick={onToggleCoop}
+              className={`btn-neon rounded-xl px-4 py-2 text-xs font-black ${!settings.coOp ? 'btn-primary' : 'btn-ghost'}`}
+            >
+              👤 تکی
+            </button>
+            <button
+              onClick={coarsePointer ? undefined : onToggleCoop}
+              disabled={coarsePointer}
+              title={coarsePointer ? 'needs a keyboard' : undefined}
+              className={`btn-neon rounded-xl px-4 py-2 text-xs font-black ${settings.coOp ? 'btn-primary' : 'btn-ghost'} ${coarsePointer ? 'cursor-not-allowed opacity-40' : ''}`}
+            >
+              👥 دونفره
+            </button>
+          </div>
+        </div>
+
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
           <button
             onClick={onPlay}
             className="btn-neon btn-primary btn-hero-pulse group inline-flex items-center gap-2.5 rounded-2xl px-12 py-4 text-[18px] font-black"
           >
             <Play size={22} className="transition-transform group-hover:scale-125" />
-            شروع نبرد
+            {settings.coOp ? 'شروع نبرد دونفره' : 'شروع نبرد'}
             <span className="rounded-md bg-black/20 px-2 py-0.5 text-[11px] font-bold" dir="ltr">▶</span>
           </button>
           <button
@@ -265,7 +306,7 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
                     {b.score.toLocaleString('en-US')}
                   </span>
                   <span className="tabular text-slate-500">
-                    موج {b.wave} · {b.kills} کیل · {formatTime(b.time)}
+                    موج {b.wave} · {b.kills} کیل · {formatTime(b.time)}{b.coOp ? ' · 👥' : ''}
                   </span>
                 </div>
               ))}
@@ -326,7 +367,7 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
                     {r.endless && <InfinityIcon size={11} className="ml-1 inline text-violet-300" />}
                   </span>
                   <span className="tabular text-slate-500">
-                    موج {r.wave} · {r.kills} کیل · {formatTime(r.time)}
+                    موج {r.wave} · {r.kills} کیل · {formatTime(r.time)}{r.coOp ? ' · 👥' : ''}
                   </span>
                 </div>
               ))}

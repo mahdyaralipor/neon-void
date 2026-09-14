@@ -38,9 +38,10 @@ export default function GameOver({ result, best, board, onRetry, onMenu, onEndle
   const [copied, setCopied] = useState(false);
   const share = async () => {
     const url = 'https://mahdyaralipor.github.io/neon-void/';
+    const coop = result.coOp ? ' · 👥 دونفره' : '';
     const txt = victory
-      ? `NEON VOID 🏆 پیروزی در موج ۲۰ — ${formatScore(result.score)} امتیاز · ${result.kills} کیل · ${formatTime(result.time)}\n${url}`
-      : `NEON VOID${result.endless ? ' ♾️' : ''} — ${formatScore(result.score)} امتیاز · موج ${result.wave} · ${result.kills} کیل · گرید ${result.grade} · ${formatTime(result.time)}\n${url}`;
+      ? `NEON VOID 🏆 پیروزی در موج ۲۰ — ${formatScore(result.score)} امتیاز · ${result.kills} کیل · ${formatTime(result.time)}${coop}\n${url}`
+      : `NEON VOID${result.endless ? ' ♾️' : ''} — ${formatScore(result.score)} امتیاز · موج ${result.wave} · ${result.kills} کیل · گرید ${result.grade} · ${formatTime(result.time)}${coop}\n${url}`;
     try {
       await navigator.clipboard.writeText(txt);
       setCopied(true);
@@ -182,6 +183,11 @@ export default function GameOver({ result, best, board, onRetry, onMenu, onEndle
           {result.endless && (
             <div className="chip mx-auto w-fit !border-violet-300/25 !bg-violet-400/10 !text-violet-100" dir="ltr">
               ♾️ ENDLESS · W{result.wave}
+            </div>
+          )}
+          {result.coOp && (
+            <div className="chip mx-auto mt-2 w-fit !border-cyan-300/25 !bg-cyan-400/10 !text-cyan-100" dir="ltr">
+              👥 CO-OP
             </div>
           )}
         </div>

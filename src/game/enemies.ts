@@ -131,6 +131,22 @@ export function bossMultFor(wave: number): number {
   return 1 + (wave / 5 - 1) * 0.9;
 }
 
+export interface Targetable {
+  x: number;
+  y: number;
+  alive: boolean;
+}
+
+/** Nearest living pilot for enemy AI. Solo passes p2=null and behaves
+ *  exactly like the old always-chase-P1 code. */
+export function pickTarget(ax: number, ay: number, p1: Targetable, p2: Targetable | null): Targetable {
+  if (!p2 || !p2.alive) return p1;
+  if (!p1.alive) return p2;
+  const d1 = (ax - p1.x) * (ax - p1.x) + (ay - p1.y) * (ay - p1.y);
+  const d2 = (ax - p2.x) * (ax - p2.x) + (ay - p2.y) * (ay - p2.y);
+  return d2 < d1 ? p2 : p1;
+}
+
 export function eliteChanceFor(wave: number, mutator: MutatorKind | null, difficulty: Difficulty): number {
   const base = Math.min(0.16, 0.03 + wave * 0.008);
   const gold = mutator === 'gold_rush' ? 0.12 : 0;
