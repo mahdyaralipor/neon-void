@@ -20,6 +20,14 @@ const SPEEDS = [
   { id: 1.25, fa: 'توربو', en: '1.25×' },
 ] as const;
 
+const QUALITIES = [
+  { id: 'auto', fa: 'خودکار', en: 'AUTO', desc: 'FPS افتاد ← سبک می‌شود' },
+  { id: 'high', fa: 'سینمایی', en: 'CINEMA', desc: 'پر افکت · قوی‌ها' },
+  { id: 'balanced', fa: 'متعادل', en: 'BALANCED', desc: 'خوب + سبک‌تر' },
+  { id: 'performance', fa: 'عملکرد', en: 'PERF', desc: 'سیستم متوسط' },
+  { id: 'potato', fa: 'سبک', en: 'LITE', desc: 'سیستم ضعیف · ۶۰fps' },
+] as const;
+
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
   return (
     <button
@@ -89,6 +97,33 @@ export default function SettingsModal({ settings, onChange, onClose }: Props) {
           ))}
         </div>
 
+        <div className="mt-4 text-xs font-extrabold text-slate-300">کیفیت گرافیک — سبک ولی همچنان جذاب</div>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {QUALITIES.map((q) => {
+            const active = (settings.qualityMode ?? 'auto') === q.id;
+            return (
+              <button
+                key={q.id}
+                onClick={() => onChange({ ...settings, qualityMode: q.id, autoQuality: q.id === 'auto' })}
+                className={`card-hover rounded-2xl border p-3 text-right ${
+                  active
+                    ? 'border-cyan-200/40 bg-cyan-300/[0.08] shadow-[0_0_20px_rgba(0,240,255,0.15)]'
+                    : 'border-white/[0.07] bg-white/[0.025]'
+                }`}
+              >
+                <div className="text-[13px] font-extrabold text-white">{q.fa}</div>
+                <div className="font-display tabular text-[10px] tracking-[0.14em] text-slate-500" dir="ltr">
+                  {q.en}
+                </div>
+                <div className="mt-1 text-[11px] text-slate-500">{q.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-[11px] leading-5 text-slate-500">
+          حالت سبک: رزولوشن کمتر + ذره کمتر، ولی فلش انفجار و شوک‌ویو می‌ماند — جذابیت کم نمی‌شود.
+        </p>
+
         <div className="mt-5 space-y-4">
           {[
             { label: 'تراکم ذرات', pct: Math.round(settings.particles * 100), min: 0.2, max: 1, step: 0.1, val: settings.particles, set: (v: number) => onChange({ ...settings, particles: v }) },
@@ -117,9 +152,8 @@ export default function SettingsModal({ settings, onChange, onClose }: Props) {
           {[
             { label: 'لرزش صفحه', on: settings.shake, fn: () => onChange({ ...settings, shake: !settings.shake }), hint: '' },
             { label: 'بی‌صدا', on: settings.muted, fn: () => onChange({ ...settings, muted: !settings.muted }), hint: '' },
-            { label: 'کیفیت خودکار', on: settings.autoQuality, fn: () => onChange({ ...settings, autoQuality: !settings.autoQuality }), hint: 'افت FPS ← کاهش ذرات' },
             { label: 'اعداد دمیج', on: settings.showDamageNumbers, fn: () => onChange({ ...settings, showDamageNumbers: !settings.showDamageNumbers }), hint: 'فقط کریت‌ها' },
-            { label: 'نمایش FPS', on: settings.showFps, fn: () => onChange({ ...settings, showFps: !settings.showFps }), hint: '' },
+            { label: 'نمایش FPS', on: settings.showFps, fn: () => onChange({ ...settings, showFps: !settings.showFps }), hint: 'FPS + سطح کیفیت' },
           ].map((t) => (
             <div key={t.label} className="flex items-center justify-between rounded-xl bg-white/[0.03] px-3.5 py-2.5">
               <div>

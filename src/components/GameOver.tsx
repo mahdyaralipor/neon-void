@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Home, RotateCcw, Trophy, Share2, Check } from 'lucide-react';
+import { Home, RotateCcw, Trophy, Share2, Check, Infinity as InfinityIcon } from 'lucide-react';
 import type { GameResult, Grade } from '../game/types';
 import type { BoardEntry } from '../game/storage';
 import { formatScore, formatTime } from '../game/utils';
@@ -11,12 +11,13 @@ interface Props {
   board: BoardEntry[];
   onRetry: () => void;
   onMenu: () => void;
+  onEndless?: () => void;
 }
 
 const GRADE_TILE: Record<Grade, string> = {
-  S: 'from-amber-200 to-yellow-400 text-amber-950',
-  A: 'from-violet-300 to-purple-400 text-purple-950',
-  B: 'from-cyan-200 to-sky-300 text-sky-950',
+  S: 'from-amber-200 via-yellow-300 to-orange-400 text-amber-950 shadow-[0_0_50px_rgba(255,211,25,0.5)]',
+  A: 'from-violet-300 via-purple-400 to-fuchsia-500 text-purple-950 shadow-[0_0_40px_rgba(177,75,255,0.5)]',
+  B: 'from-cyan-200 via-sky-300 to-blue-400 text-sky-950 shadow-[0_0_36px_rgba(0,240,255,0.45)]',
   C: 'from-emerald-200 to-green-300 text-emerald-950',
   D: 'from-slate-300 to-slate-400 text-slate-900',
 };
@@ -29,8 +30,9 @@ const GRADE_FA: Record<Grade, string> = {
   D: 'دفعه بعد بهتر',
 };
 
-export default function GameOver({ result, best, board, onRetry, onMenu }: Props) {
+export default function GameOver({ result, best, board, onRetry, onMenu, onEndless }: Props) {
   const victory = result.victory;
+  const canEndless = victory && !result.endless && onEndless;
   const [copied, setCopied] = useState(false);
   const share = async () => {
     const txt = victory
@@ -54,8 +56,26 @@ export default function GameOver({ result, best, board, onRetry, onMenu }: Props
     ['لول', String(result.level)],
   ];
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-md">
-      <div className="glass anim-rise my-auto w-full max-w-md rounded-3xl p-6 text-center sm:p-7">
+    <div className="scanlines absolute inset-0 z-30 flex items-center justify-center overflow-y-auto overflow-hidden bg-black/75 p-4 backdrop-blur-lg">
+      {victory && (
+        <>
+          <div className="victory-rays pointer-events-none absolute inset-0" />
+          {Array.from({ length: 28 }).map((_, i) => (
+            <span
+              key={i}
+              className="victory-confetti"
+              style={{
+                left: `${(i * 37) % 100}%`,
+                background: ['#00f0ff', '#ff2d78', '#ffd319', '#a3ff12', '#b14bff'][i % 5],
+                animationDuration: `${2.2 + (i % 5) * 0.5}s`,
+                animationDelay: `${(i % 7) * 0.3}s`,
+                boxShadow: '0 0 8px currentColor',
+              }}
+            />
+          ))}
+        </>
+      )}
+      <div className={`glass anim-rise relative my-auto w-full max-w-md rounded-3xl p-6 text-center sm:p-7 ${victory ? '!border-amber-200/30 shadow-[0_0_60px_rgba(255,211,25,0.25)]' : ''}`}>
         <div className="flex items-center justify-center gap-4">
           <div className={`anim-grade inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br ${GRADE_TILE[result.grade]}`}>
             <span className="font-display text-4xl font-black" dir="ltr">{result.grade}</span>
@@ -77,7 +97,7 @@ export default function GameOver({ result, best, board, onRetry, onMenu }: Props
           </div>
         )}
 
-        <div className="font-display tabular mt-4 text-[42px] font-bold leading-none tracking-tight text-white" dir="ltr">
+        <div className="font-display tabular anim-score-pop mt-4 text-[48px] font-black leading-none tracking-tight text-white neon-text" dir="ltr">
           {formatScore(result.score)}
         </div>
         <div className="tabular mt-1.5 text-[11px] text-slate-500" dir="ltr">
@@ -118,7 +138,16 @@ export default function GameOver({ result, best, board, onRetry, onMenu }: Props
           </div>
         )}
 
-        <div className="mt-5 flex gap-2">
+        <div className="mt-5 flex flex-col gap-2">
+          {canEndless && (
+            <button
+              onClick={onEndless}
+              className="btn-neon btn-primary btn-hero-pulse inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-[15px] font-black"
+            >
+              <InfinityIcon size={18} /> ادامه بی‌پایان ♾️ ×۱.۵ امتیاز
+            </button>
+          )}
+          <div className="flex gap-2">
           <button
             onClick={onRetry}
             className="btn-neon btn-primary flex-1 inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black"
@@ -138,6 +167,12 @@ export default function GameOver({ result, best, board, onRetry, onMenu }: Props
           >
             <Home size={15} className="text-slate-400" /> منو
           </button>
+          </div>
+          {result.endless && (
+            <div className="chip mx-auto w-fit !border-violet-300/25 !bg-violet-400/10 !text-violet-100" dir="ltr">
+              ♾️ ENDLESS · W{result.wave}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -50,7 +50,7 @@ interface Star {
   z: number;
 }
 
-const MAX_P = 900;
+const MAX_P = 700;
 
 export class ParticleSystem {
   private pool: Particle[] = [];
@@ -59,6 +59,17 @@ export class ParticleSystem {
   private stars: Star[] = [];
   private cursor = 0;
   scale = 1;
+  /** 0 cinematic · 1 balanced · 2 performance · 3 potato — set by engine */
+  quality = 0;
+
+  setQuality(q: number): void {
+    this.quality = Math.max(0, Math.min(3, Math.round(q)));
+  }
+
+  /** visible star count shrinks on weak GPUs — cheap fill-rate win */
+  get starCount(): number {
+    return this.quality === 0 ? 140 : this.quality === 1 ? 100 : this.quality === 2 ? 65 : 38;
+  }
 
   constructor() {
     for (let i = 0; i < MAX_P; i++) {
@@ -89,22 +100,104 @@ export class ParticleSystem {
   }
 
   explosion(x: number, y: number, color: string, count: number, power = 320): void {
+    // juice preserved via bigger/faster sparks, not just more of them —
+    // low quality keeps the core flash + fewer satellites so kills still pop.
+    const juice = this.quality <= 1 ? 1.6 : this.quality === 2 ? 1.1 : 0.8;
+    const n = Math.round(count * this.scale * juice);
+    for (let i = 0; i < n; i++) {
+      const p = this.alloc();
+      if (!p) return;
+      const a = Math.random() * TAU;
+      const sp = rand(power * 0.15, power * 1.25);
+      p.alive = true;
+      p.x = x; p.y = y;
+      p.vx = Math.cos(a) * sp;
+      p.vy = Math.sin(a) * sp;
+      p.maxLife = rand(0.4, 1.0);
+      p.life = p.maxLife;
+      p.size = rand(1.8, 5.5);
+      p.color = Math.random() < 0.35 ? '#ffffff' : color;
+      p.drag = 2.8;
+      p.shape = Math.random() < 0.45 ? 1 : 0;
+    }
+    // hot core flash — always kept, even on potato (1 sprite = cheap pop)
+    const core = this.alloc();
+    if (core) {
+      core.alive = true;
+      core.x = x; core.y = y;
+      core.vx = 0; core.vy = 0;
+      core.maxLife = 0.22; core.life = 0.22;
+      core.size = this.quality >= 3 ? 7 : 9;
+      core.color = '#ffffff';
+      core.drag = 1;
+      core.shape = 0;
+    }
+  }
+
+  /** small directional impact sparks on every bullet hit */
+  hitSpark(x: number, y: number, angle: number, color: string): void {
+    const n = Math.max(2, Math.round(4 * this.scale));
+    for (let i = 0; i < n; i++) {
+      const p = this.alloc();
+      if (!p) return;
+      const a = angle + rand(-0.9, 0.9);
+      const sp = rand(180, 520);
+      p.alive = true;
+      p.x = x; p.y = y;
+      p.vx = Math.cos(a) * sp; p.vy = Math.sin(a) * sp;
+      p.maxLife = rand(0.15, 0.35); p.life = p.maxLife;
+      p.size = rand(1.5, 3.4);
+      p.color = Math.random() < 0.4 ? '#ffffff' : color;
+      p.drag = 5;
+      p.shape = 1;
+    }
+  }
+
+  /** dash afterimage burst */
+  dashBurst(x: number, y: number, angle: number, color: string): void {
+    const n = Math.max(4, Math.round(10 * this.scale));
+    for (let i = 0; i < n; i++) {
+      const p = this.alloc();
+      if (!p) return;
+      const a = angle + Math.PI + rand(-0.6, 0.6);
+      const sp = rand(80, 320);
+      p.alive = true;
+      p.x = x + rand(-6, 6); p.y = y + rand(-6, 6);
+      p.vx = Math.cos(a) * sp; p.vy = Math.sin(a) * sp;
+      p.maxLife = rand(0.25, 0.55); p.life = p.maxLife;
+      p.size = rand(2, 4.2);
+      p.color = i % 3 === 0 ? '#ffffff' : color;
+      p.drag = 3.4;
+      p.shape = 0;
+    }
+  }
+
+  /** level-up ring explosion */
+  levelUp(x: number, y: number): void {
+    this.shockwave(x, y, '#00f0ff', 170, 0.6, 6);
+    this.shockwave(x, y, '#ffffff', 110, 0.45, 3);
+    this.explosion(x, y, '#00f0ff', 34, 420);
+    this.explosion(x, y, '#ffd319', 14, 300);
+  }
+
+  /** victory / big-boss confetti storm */
+  confetti(x: number, y: number, count = 60): void {
+    const colors = ['#00f0ff', '#ff2d78', '#ffd319', '#a3ff12', '#b14bff', '#ffffff'];
     const n = Math.round(count * this.scale);
     for (let i = 0; i < n; i++) {
       const p = this.alloc();
       if (!p) return;
       const a = Math.random() * TAU;
-      const sp = rand(power * 0.15, power);
+      const sp = rand(120, 640);
       p.alive = true;
-      p.x = x; p.y = y;
+      p.x = x + rand(-20, 20); p.y = y + rand(-20, 20);
       p.vx = Math.cos(a) * sp;
-      p.vy = Math.sin(a) * sp;
-      p.maxLife = rand(0.35, 0.9);
-      p.life = p.maxLife;
-      p.size = rand(1.5, 4.5);
-      p.color = Math.random() < 0.3 ? '#ffffff' : color;
-      p.drag = 3.2;
-      p.shape = Math.random() < 0.35 ? 1 : 0;
+      p.vy = Math.sin(a) * sp - 160;
+      p.maxLife = rand(0.8, 1.8); p.life = p.maxLife;
+      p.size = rand(2, 5);
+      p.color = colors[i % colors.length];
+      p.drag = 1.6;
+      p.shape = 2;
     }
   }
 
@@ -218,13 +311,19 @@ export class ParticleSystem {
     const wSpan = vw + 100;
     const hSpan = vh + 100;
     const t = performance.now() / 1000;
-    for (const s of this.stars) {
+    const n = Math.min(this.stars.length, this.starCount);
+    const twinkle = this.quality >= 2 ? 1 : 0; // potato skips sin twinkle
+    for (let i = 0; i < n; i++) {
+      const s = this.stars[i];
       const drift = 0.25 + s.z * 0.35;
       const x = (((s.x - cam.x * drift) % wSpan) + wSpan) % wSpan - 50;
       const y = (((s.y - cam.y * drift) % hSpan) + hSpan) % hSpan - 50;
-      // gentle twinkle — tasteful, not arcade blink
-      const tw = 0.75 + 0.25 * Math.sin(t * (0.6 + s.z) + s.x * 0.05);
-      ctx.globalAlpha = (0.16 + s.z * 0.4) * tw;
+      if (twinkle === 0) {
+        const tw = 0.75 + 0.25 * Math.sin(t * (0.6 + s.z) + s.x * 0.05);
+        ctx.globalAlpha = (0.16 + s.z * 0.4) * tw;
+      } else {
+        ctx.globalAlpha = 0.16 + s.z * 0.4;
+      }
       ctx.fillStyle = s.z > 0.8 ? '#c8ecff' : '#e8ecf5';
       const sz = 0.8 + s.z * 1.3;
       ctx.fillRect(x, y, sz, sz);
@@ -232,28 +331,46 @@ export class ParticleSystem {
     ctx.restore();
   }
 
-  draw(ctx: CanvasRenderingContext2D): void {
+  draw(ctx: CanvasRenderingContext2D, cam?: Cam, vw?: number, vh?: number): void {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
+    const cheap = this.quality >= 2;
+    // cull margin so offscreen fireworks cost nothing on weak chips
+    const hasCull = cam !== undefined && vw !== undefined && vh !== undefined;
+    const x0 = hasCull ? cam!.x - 60 : 0;
+    const y0 = hasCull ? cam!.y - 60 : 0;
+    const x1 = hasCull ? cam!.x + vw! + 60 : 0;
+    const y1 = hasCull ? cam!.y + vh! + 60 : 0;
     for (const p of this.pool) {
       if (!p.alive) continue;
+      if (hasCull && (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1)) continue;
       const t = p.life / p.maxLife;
       ctx.globalAlpha = t;
       ctx.fillStyle = p.color;
       if (p.shape === 1) {
-        const len = 1 + (1 - t) * 8;
-        const a = Math.atan2(p.vy, p.vx);
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(a);
-        ctx.fillRect(-len / 2, -p.size / 2, len, p.size);
-        ctx.restore();
+        if (cheap) {
+          // potato: axis-aligned streak, no save/rotate (2-3x faster)
+          ctx.fillRect(p.x - 3, p.y - 1, 6, 2);
+        } else {
+          const len = 1 + (1 - t) * 8;
+          const a = Math.atan2(p.vy, p.vx);
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(a);
+          ctx.fillRect(-len / 2, -p.size / 2, len, p.size);
+          ctx.restore();
+        }
       } else if (p.shape === 2) {
         ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
       } else {
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size * (0.4 + t * 0.6), 0, TAU);
-        ctx.fill();
+        if (cheap && p.size < 3) {
+          const s = p.size * (0.4 + t * 0.6);
+          ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+        } else {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * (0.4 + t * 0.6), 0, TAU);
+          ctx.fill();
+        }
       }
     }
     for (const w of this.waves) {

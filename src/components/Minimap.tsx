@@ -19,6 +19,7 @@ const DOT_COLOR: Record<string, string> = {
   tank: '#ff6b35',
   lancer: '#2dd4bf',
   hive: '#fbbf24',
+  stinger: '#5df2ff',
   boss: '#ff2244',
   gem: '#a3ff12',
   powerup: '#ffffff',

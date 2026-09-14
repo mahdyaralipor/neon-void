@@ -51,11 +51,12 @@ export type EnemyKind =
   | 'tank'
   | 'lancer'
   | 'hive'
+  | 'stinger'
   | 'boss';
 
 export type PowerUpKind = 'shield' | 'magnet' | 'nuke' | 'overdrive' | 'heal' | 'frost';
 
-export type MutatorKind = 'swarm' | 'snipers' | 'elite_hunt' | 'surge' | 'gold_rush';
+export type MutatorKind = 'swarm' | 'snipers' | 'elite_hunt' | 'surge' | 'gold_rush' | 'voidstorm';
 
 export interface MutatorDef {
   kind: MutatorKind;
@@ -70,6 +71,7 @@ export const MUTATORS: Record<MutatorKind, MutatorDef> = {
   elite_hunt: { kind: 'elite_hunt', nameFa: 'شکار الیت', nameEn: 'ELITE HUNT', scoreMult: 1.4 },
   surge: { kind: 'surge', nameFa: 'موج سرعت', nameEn: 'SPEED SURGE', scoreMult: 1.3 },
   gold_rush: { kind: 'gold_rush', nameFa: 'تب طلا', nameEn: 'GOLD RUSH', scoreMult: 1.3 },
+  voidstorm: { kind: 'voidstorm', nameFa: 'طوفان خلأ', nameEn: 'VOIDSTORM', scoreMult: 1.6 },
 };
 
 /** Permanent meta progression (Void Lab) — each track 0..META_MAX_LEVEL. */
@@ -123,24 +125,24 @@ export interface PlayerStats {
 }
 
 export const BASE_STATS: PlayerStats = {
-  damage: 14,
-  fireRate: 4.2,
-  bulletSpeed: 780,
+  damage: 16,
+  fireRate: 4.8,
+  bulletSpeed: 880,
   pierce: 0,
   multishot: 1,
   spread: 0.11,
-  critChance: 0.08,
-  critMult: 2.1,
-  moveSpeed: 360,
-  maxHp: 100,
-  regen: 1.1,
-  magnet: 125,
+  critChance: 0.1,
+  critMult: 2.2,
+  moveSpeed: 385,
+  maxHp: 110,
+  regen: 1.4,
+  magnet: 150,
   armor: 0,
-  dashCooldownMax: 2.0,
+  dashCooldownMax: 1.8,
   xpGainMult: 1,
   lifesteal: 0,
   orbitals: 0,
-  orbitalDamage: 0.6,
+  orbitalDamage: 0.65,
 };
 
 export function statsForShip(ship: ShipId, meta: MetaLevels = META_ZERO): PlayerStats {
@@ -186,6 +188,7 @@ export interface EngineOptions {
   muted: boolean;
   ship: ShipId;
   autoQuality: boolean;
+  qualityMode?: 'auto' | 'high' | 'balanced' | 'performance' | 'potato';
   meta: MetaLevels;
   /** global game-speed multiplier (0.9 calm / 1 standard / 1.25 turbo) */
   speed: number;
@@ -208,6 +211,8 @@ export interface PowerUpState {
 export interface WeaponMods {
   nova: number;
   seeker: number;
+  chain: number;
+  phasedive: number;
   secondwind: boolean;
   swCd: number; // second-wind cooldown remaining
 }
@@ -267,6 +272,7 @@ export interface GameResult {
   shards: number;
   powerups: number;
   victory: boolean;
+  endless: boolean;
   deathBy: string | null;
 }
 

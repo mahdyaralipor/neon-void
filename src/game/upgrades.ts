@@ -123,6 +123,22 @@ export const UPGRADE_POOL: UpgradeDef[] = [
     descFa: 'نجات از مرگ با ۳۰٪ جان (۹۰ ثانیه کول‌داون)', descEn: 'cheat death once',
     tier: 'epic', maxStacks: 2, icon: 'secondwind',
   },
+  // ---- NEW in v6 ----
+  {
+    id: 'chain', nameFa: 'طوفان زنجیره‌ای', nameEn: 'Chain Storm',
+    descFa: 'هر ۴ ثانیه صاعقه به ۵ دشمن نزدیک', descEn: 'chain lightning zap',
+    tier: 'epic', maxStacks: 3, icon: 'chain',
+  },
+  {
+    id: 'headhunter', nameFa: 'شکارچی سر', nameEn: 'Headhunter',
+    descFa: '+۴۰٪ دمیج کریت +۴٪ شانس کریت', descEn: '+40% crit damage',
+    tier: 'rare', maxStacks: 4, icon: 'headhunter',
+  },
+  {
+    id: 'phasedive', nameFa: 'شیرجه فاز', nameEn: 'Phase Dive',
+    descFa: 'دش به دشمنان ۳× دمیج می‌زند', descEn: 'dash deals damage',
+    tier: 'rare', maxStacks: 3, icon: 'phasedive',
+  },
 ];
 
 export function applyUpgrade(stats: PlayerStats, id: string): void {
@@ -160,6 +176,9 @@ export function applyUpgrade(stats: PlayerStats, id: string): void {
     case 'combomaster': stats.xpGainMult *= 1.1; break;
     case 'emergency': stats.maxHp += 15; stats.regen += 0.8; break;
     case 'thorns': stats.armor += 1; break;
+    case 'chain': stats.fireRate = Math.min(14, stats.fireRate * 1.04); break;
+    case 'headhunter': stats.critMult += 0.4; stats.critChance = Math.min(0.8, stats.critChance + 0.04); break;
+    case 'phasedive': stats.dashCooldownMax = Math.max(0.6, stats.dashCooldownMax * 0.92); stats.moveSpeed *= 1.03; break;
   }
 }
 

@@ -21,6 +21,10 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'hive_cleanser', nameFa: 'کندوکُش', nameEn: 'HIVE CLEANSER', descFa: 'نابودی ۳ کندو در یک ران', icon: 'hexagon' },
   { id: 'frost_king', nameFa: 'سلطان یخ', nameEn: 'FROST KING', descFa: 'منجمد کردن ۲۵+ دشمن همزمان', icon: 'snowflake' },
   { id: 'second_wind', nameFa: 'فرصت دوباره', nameEn: 'SECOND WIND', descFa: 'نجات از مرگ حتمی', icon: 'heartpulse' },
+  { id: 'endless1', nameFa: 'فراتر از خلأ', nameEn: 'BEYOND VOID', descFa: 'ورود به حالت بی‌پایان', icon: 'crown' },
+  { id: 'chainlord', nameFa: 'ارباب صاعقه', nameEn: 'CHAIN LORD', descFa: 'گرفتن طوفان زنجیره‌ای', icon: 'combo' },
+  { id: 'stinger15', nameFa: 'نیش‌شکن', nameEn: 'STING BREAKER', descFa: 'نابودی ۱۵ نیش‌دار', icon: 'skull' },
+  { id: 'stormrider', nameFa: 'سوار طوفان', nameEn: 'STORM RIDER', descFa: 'بقا در موتاتور طوفان خلأ', icon: 'snowflake' },
 ];
 
 const KEY = 'neon-void-achievements-v1';

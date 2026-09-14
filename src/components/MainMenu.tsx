@@ -2,13 +2,17 @@ import {
   Play, Settings, Trophy, Volume2, VolumeX, Gamepad2, Shield,
   Star, Rocket, Ghost, Anchor, Medal, Swords, Timer, Layers,
   Droplet, Sparkles, Crown, Skull, Orbit, Award, Crosshair,
-  FlaskConical, Gem, Hexagon, Snowflake, HeartPulse,
+  FlaskConical, Gem, Hexagon, Snowflake, HeartPulse, BookOpen,
+  History, Infinity as InfinityIcon, Zap,
 } from 'lucide-react';
 import { SHIPS, type ShipDef, type ShipId } from '../game/types';
-import type { BoardEntry, SavedSettings, Totals } from '../game/storage';
+import { getRuns, type BoardEntry, type SavedSettings, type Totals } from '../game/storage';
 import type { MetaLevels } from '../game/types';
 import { ACHIEVEMENTS, getUnlockedAchievements } from '../game/achievements';
+import { ENEMY_COLOR, ENEMY_FA, ENEMY_LORE } from '../game/engine';
+import type { EnemyKind } from '../game/types';
 import { formatTime } from '../game/utils';
+import MenuBackdrop from './MenuBackdrop';
 import { useMemo } from 'react';
 
 const ACH_ICON: Record<string, typeof Shield> = {
@@ -80,27 +84,38 @@ function ShipMeters({ s }: { s: ShipDef }) {
 
 export default function MainMenu({ best, board, totals, settings, shards, meta, onPlay, onOpenSettings, onOpenLab, onToggleMute, onSelectShip }: Props) {
   const unlocked = useMemo(() => getUnlockedAchievements(), []);
+  const runs = useMemo(() => getRuns(), []);
   const metaTotal = meta.dmg + meta.hp + meta.speed + meta.xp;
+  const codexKinds = useMemo(() => Object.keys(ENEMY_COLOR) as EnemyKind[], []);
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12">
+      <MenuBackdrop />
       <div className="menu-grid-bg anim-grid absolute inset-0" />
       <div className="anim-blob-a absolute -top-32 left-1/2 h-72 w-[42rem] -translate-x-1/2 rounded-full bg-cyan-500/[0.09] blur-[110px]" />
       <div className="anim-blob-b absolute bottom-0 right-0 h-64 w-96 rounded-full bg-pink-600/[0.08] blur-[110px]" />
       <div className="anim-blob-c absolute top-1/3 left-0 h-56 w-72 rounded-full bg-violet-600/[0.08] blur-[100px]" />
 
       <div className="relative w-full max-w-4xl text-center">
-        <div className="anim-rise chip mx-auto w-fit text-slate-400">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-          نسخه ۴ · هدف: فتح موج ۲۰
+        <div className="anim-rise chip mx-auto w-fit !border-cyan-300/25 !bg-cyan-300/[0.08] text-cyan-100 shadow-[0_0_24px_rgba(0,240,255,0.18)]">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-75" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-300" />
+          </span>
+          نسخه ۷ · MAGNETIC · بکش، بترکون، برگرد ♾️
         </div>
 
-        <h1
-          className="font-display anim-title title-gradient mt-5 text-6xl font-black tracking-tight sm:text-7xl"
-          dir="ltr"
-        >
-          NEON VOID
-        </h1>
-        <p className="mt-3 text-[15px] font-medium text-slate-400">آرنا سروایور نئونی — بقا در خلأ</p>
+        <div className="relative mx-auto mt-5 w-fit">
+          <div className="anim-pulse-ring absolute inset-0 rounded-full bg-cyan-400/10 blur-2xl" />
+          <h1
+            className="font-display anim-title title-gradient relative text-7xl font-black tracking-tight sm:text-8xl"
+            dir="ltr"
+          >
+            NEON VOID
+          </h1>
+          <div className="pointer-events-none absolute -inset-6 -z-10 bg-[radial-gradient(ellipse_at_center,rgba(0,240,255,0.14),transparent_65%)] blur-xl" />
+        </div>
+        <p className="mt-3 text-[15px] font-medium text-slate-200">آرنا سروایور نئونی — <span className="neon-text font-bold text-cyan-200">هر ۳۰ ثانیه یه لول، هر موج یه غافلگیری</span></p>
+        <p className="mt-1.5 text-[12.5px] text-slate-400">⚡ صاعقه زنجیره‌ای · 💨 شیرجه فاز · 🌩️ طوفان خلأ · ♾️ بی‌پایان بعد پیروزی</p>
 
         {(best > 0 || totals.runs > 0) && (
           <div className="mx-auto mt-5 flex w-fit flex-wrap items-center justify-center gap-2">
@@ -141,20 +156,21 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
                   onClick={() => onSelectShip(s.id)}
                   className={`card-hover anim-rise rounded-2xl border p-4 text-right ${
                     active
-                      ? 'border-cyan-200/40 bg-cyan-300/[0.07]'
+                      ? 'border-cyan-200/50 bg-cyan-300/[0.09] shadow-[0_0_32px_rgba(0,240,255,0.18),inset_0_1px_0_rgba(255,255,255,0.1)]'
                       : 'border-white/[0.07] bg-white/[0.025]'
                   } stagger-${Math.min(4, i + 1)}`}
+                  style={active ? { boxShadow: `0 0 32px ${s.color}33, inset 0 1px 0 rgba(255,255,255,0.1)` } : undefined}
                 >
                   <div className="flex items-center justify-between">
                     <span
-                      className="rounded-xl p-2"
-                      style={{ color: s.color, backgroundColor: `${s.color}14` }}
+                      className="rounded-xl p-2 shadow-[0_0_18px_rgba(0,0,0,0.4)]"
+                      style={{ color: s.color, backgroundColor: `${s.color}1f`, boxShadow: `0 0 20px ${s.color}44` }}
                     >
                       <Icon size={20} />
                     </span>
                     <span
                       className={`h-2 w-2 rounded-full transition ${
-                        active ? 'bg-cyan-300 shadow-[0_0_10px_rgba(0,240,255,0.8)]' : 'bg-white/15'
+                        active ? 'bg-cyan-300 shadow-[0_0_12px_rgba(0,240,255,0.9)]' : 'bg-white/15'
                       }`}
                     />
                   </div>
@@ -198,10 +214,11 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
           <button
             onClick={onPlay}
-            className="btn-neon btn-primary group inline-flex items-center gap-2.5 rounded-2xl px-10 py-4 text-[17px] font-black"
+            className="btn-neon btn-primary btn-hero-pulse group inline-flex items-center gap-2.5 rounded-2xl px-12 py-4 text-[18px] font-black"
           >
-            <Play size={20} className="transition-transform group-hover:scale-110" />
+            <Play size={22} className="transition-transform group-hover:scale-125" />
             شروع نبرد
+            <span className="rounded-md bg-black/20 px-2 py-0.5 text-[11px] font-bold" dir="ltr">▶</span>
           </button>
           <button
             onClick={onOpenSettings}
@@ -282,11 +299,68 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
           </div>
         </div>
 
+        {runs.length > 0 && (
+          <div className="glass mt-4 rounded-2xl p-4 text-right">
+            <div className="mb-2.5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <History size={14} className="text-cyan-200/80" />
+                <span className="text-xs font-extrabold text-slate-200">ران‌های اخیر</span>
+              </div>
+              <span className="eyebrow" dir="ltr">LAST {Math.min(5, runs.length)}</span>
+            </div>
+            <div className="space-y-1">
+              {runs.slice(0, 5).map((r, i) => (
+                <div
+                  key={`${r.date}-${i}`}
+                  className="flex items-center justify-between rounded-xl px-3 py-2 text-[12px] odd:bg-white/[0.025]"
+                >
+                  <span className="font-display tabular font-bold text-slate-100" dir="ltr">
+                    {r.score.toLocaleString('en-US')}
+                    {r.victory && <span className="ml-1 text-amber-200">🏆</span>}
+                    {r.endless && <InfinityIcon size={11} className="ml-1 inline text-violet-300" />}
+                  </span>
+                  <span className="tabular text-slate-500">
+                    موج {r.wave} · {r.kills} کیل · {formatTime(r.time)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="glass mt-4 rounded-2xl p-4 text-right">
+          <div className="mb-2.5 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <BookOpen size={14} className="text-violet-200/80" />
+              <span className="text-xs font-extrabold text-slate-200">دانشنامه دشمنان</span>
+            </div>
+            <span className="eyebrow" dir="ltr">CODEX · {codexKinds.length}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+            {codexKinds.map((k) => (
+              <div
+                key={k}
+                title={ENEMY_LORE[k]}
+                className="flex items-center gap-2.5 rounded-xl bg-white/[0.02] px-3 py-2.5 text-right transition hover:bg-white/[0.05]"
+              >
+                <span
+                  className="h-3 w-3 shrink-0 rounded-full"
+                  style={{ backgroundColor: ENEMY_COLOR[k], boxShadow: `0 0 12px ${ENEMY_COLOR[k]}` }}
+                />
+                <span>
+                  <span className="block text-[11.5px] font-extrabold text-slate-200">{ENEMY_FA[k]}</span>
+                  <span className="block text-[10px] leading-4 text-slate-500">{ENEMY_LORE[k]}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="mt-4 grid grid-cols-1 gap-2.5 text-right sm:grid-cols-3">
           {[
-            { icon: Gamepad2, tint: 'text-cyan-200 bg-cyan-300/10', title: 'حرکت و شلیک', body: 'WASD حرکت · موس aim · شلیک خودکار · هر لول یک ری‌رول' },
-            { icon: Shield, tint: 'text-rose-200 bg-rose-400/10', title: 'دش و پاورآپ', body: 'Shift دش · سپر، مگنت، نیوک، یخبندان و اور‌درایو' },
-            { icon: Star, tint: 'text-amber-200 bg-amber-300/10', title: 'پیشرفت', body: 'الیت ۵× تجربه · باس هر ۵ موج · هر اچیومنت ۳ خرده · فتح موج ۲۰ پیروزی است' },
+            { icon: Gamepad2, tint: 'text-cyan-200 bg-cyan-300/10', title: 'حرکت و شلیک', body: 'WASD حرکت · موس aim · شلیک خودکار · هر لول یک ری‌رول · زنجیره و شیرجه جدید!' },
+            { icon: Zap, tint: 'text-cyan-200 bg-cyan-300/10', title: 'تازه‌های v6', body: 'استینگر ۳تیره · طوفان خلأ · صاعقه زنجیره‌ای · شیرجه فاز · حالت بی‌پایان ♾️' },
+            { icon: Star, tint: 'text-amber-200 bg-amber-300/10', title: 'پیشرفت', body: 'الیت ۵× تجربه · باس هر ۵ موج · هر اچیومنت ۳ خرده · فتح موج ۲۰ بعد بی‌پایان' },
           ].map((c) => (
             <div key={c.title} className="glass rounded-2xl p-4">
               <div className="flex items-center gap-2">

@@ -34,7 +34,8 @@ export default function GameCanvas({ settings, meta, paused, callbacks, onEngine
       shakeEnabled: settings.shake,
       muted: settings.muted,
       ship: settings.ship,
-      autoQuality: settings.autoQuality,
+      autoQuality: settings.qualityMode === 'auto',
+      qualityMode: settings.qualityMode ?? 'auto',
       meta,
       speed: settings.gameSpeed,
       showDamageNumbers: settings.showDamageNumbers,
@@ -75,10 +76,10 @@ export default function GameCanvas({ settings, meta, paused, callbacks, onEngine
     e.setParticleScale(settings.particles);
     e.setShakeEnabled(settings.shake);
     e.setVolumes(settings.musicVol, settings.sfxVol);
-    e.setAutoQuality(settings.autoQuality);
+    e.setQualityMode(settings.qualityMode ?? (settings.autoQuality ? 'auto' : 'high'));
     e.setGameSpeed(settings.gameSpeed);
     e.setShowDamageNumbers(settings.showDamageNumbers);
-  }, [settings.muted, settings.particles, settings.shake, settings.musicVol, settings.sfxVol, settings.autoQuality, settings.gameSpeed, settings.showDamageNumbers]);
+  }, [settings.muted, settings.particles, settings.shake, settings.musicVol, settings.sfxVol, settings.qualityMode, settings.autoQuality, settings.gameSpeed, settings.showDamageNumbers]);
 
   return (
     <div className="absolute inset-0">

@@ -83,6 +83,18 @@ export default function App() {
     setShards(getShards());
   }, []);
 
+  const continueEndless = useCallback(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    try {
+      eng.continueEndless();
+    } catch {
+      return;
+    }
+    setResult(null);
+    setPhase('playing');
+  }, []);
+
   // engine callbacks (stable wrapper via ref in GameCanvas, so plain callbacks fine)
   const onHud = useCallback((h: HudSnapshot) => setHud(h), []);
   const onLevelUp = useCallback((c: UpgradeDef[]) => {
@@ -287,7 +299,7 @@ export default function App() {
           )}
 
           {phase === 'gameover' && result && (
-            <GameOver result={result} best={best} board={board} onRetry={startGame} onMenu={goMenu} />
+            <GameOver result={result} best={best} board={board} onRetry={startGame} onMenu={goMenu} onEndless={result.victory && !result.endless ? continueEndless : undefined} />
           )}
 
           {showSettings && screen === 'game' && (

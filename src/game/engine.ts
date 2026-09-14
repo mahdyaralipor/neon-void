@@ -26,7 +26,7 @@ import {
   applyUpgrade, rollUpgrades, executionerMult, comboScoreMult, comboWindow, thornsDamage,
 } from './upgrades';
 import { angleTo, clamp, dist2, rand, sweep, TAU } from './utils';
-import { saveBest, pushBoard, addTotals, addShards } from './storage';
+import { saveBest, pushBoard, addTotals, addShards, pushRun } from './storage';
 import { unlockAchievement, achievementDef } from './achievements';
 
 export const WORLD_W = 2600;
@@ -105,7 +105,7 @@ const DIFF: Record<Difficulty, { hp: number; dmg: number; speed: number; quota: 
   insane: { hp: 1.85, dmg: 1.65, speed: 1.13, quota: 1.55, interval: 0.66 },
 };
 
-const ENEMY_COLOR: Record<EnemyKind, string> = {
+export const ENEMY_COLOR: Record<EnemyKind, string> = {
   chaser: '#ff2d78',
   weaver: '#ff9f1c',
   dasher: '#ffcf1c',
@@ -116,6 +116,7 @@ const ENEMY_COLOR: Record<EnemyKind, string> = {
   tank: '#ff6b35',
   lancer: '#2dd4bf',
   hive: '#fbbf24',
+  stinger: '#5df2ff',
   boss: '#ff2244',
 };
 
@@ -137,7 +138,7 @@ const POWERUP_FA: Record<PowerUpKind, string> = {
   frost: '❄ یخبندان!',
 };
 
-const ENEMY_FA: Record<EnemyKind, string> = {
+export const ENEMY_FA: Record<EnemyKind, string> = {
   chaser: 'تعقیب‌کننده',
   weaver: 'بافنده',
   dasher: 'جهنده',
@@ -148,7 +149,23 @@ const ENEMY_FA: Record<EnemyKind, string> = {
   tank: 'تانک',
   lancer: 'نیزه‌دار',
   hive: 'کندو',
+  stinger: 'نیش‌دار',
   boss: 'باس',
+};
+
+export const ENEMY_LORE: Record<EnemyKind, string> = {
+  chaser: 'ساده و سمج — همیشه دنبالت می‌کند',
+  weaver: 'مارپیچ می‌آید، aim گرفتن سخت است',
+  dasher: 'تلگراف می‌زند بعد جهش مرگبار',
+  shooter: 'فاصله می‌گیرد و شلیک می‌کند',
+  splitter: 'می‌ترکد و مینی‌ها بیرون می‌ریزند',
+  mini: 'سریع و ضعیف — غذای کمبو',
+  sniper: 'لیزر دوربرد با دمیج سنگین',
+  tank: 'گوشت دم توپ — دیر می‌میرد',
+  lancer: 'شارژ خطی با تلگراف باریک',
+  hive: 'مینی‌فکتوری — زود بزنش',
+  stinger: 'جدید: ۳تیر پشت‌سرهم + سرعت بالا',
+  boss: 'هر ۵ موج — اسپیرال و احضار',
 };
 
 export class GameEngine {
@@ -200,7 +217,7 @@ export class GameEngine {
   private score = 0;
   private level = 1;
   private xp = 0;
-  private xpNext = 30;
+  private xpNext = 26;
   private combo = 0;
   private comboT = 0;
   private maxCombo = 0;
@@ -248,10 +265,12 @@ export class GameEngine {
 
   // v2.1 speed: fps monitor + auto quality
   private fpsEMA = 60;
-  private quality = 0; // 0 high, 1 medium, 2 low
+  private quality = 0; // 0 cinematic, 1 balanced, 2 performance, 3 potato
   private qualityT = 0;
   private goodT = 0;
   private baseParticleScale = 1;
+  private qualityMode: 'auto' | 'high' | 'balanced' | 'performance' | 'potato' = 'auto';
+  private renderNow = 0;
 
   // v2.1 features: wave mutator + boss/achievement tracking
   private mutator: MutatorKind | null = null;
@@ -279,6 +298,15 @@ export class GameEngine {
   private deathBy: string | null = null;
   private dashKickX = 0;
   private dashKickY = 0;
+  // v6 overdrive: endless + chain storm + voidstorm + perf
+  private endless = false;
+  private endlessAnn = false;
+  private chainCd = 2;
+  private stormT = 3;
+  private stormWarn: { x: number; y: number; t: number } | null = null;
+  private frameCount = 0;
+  private reducedMotion = false;
+  private stingerKills = 0;
 
   // cached background gradients (rebuilt on resize)
   private bgGrad: CanvasGradient | null = null;
@@ -289,7 +317,7 @@ export class GameEngine {
 
   constructor(canvas: HTMLCanvasElement, cb: EngineCallbacks, opts: EngineOptions) {
     this.canvas = canvas;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('no 2d context');
     this.ctx = ctx;
     this.cb = cb;
@@ -297,6 +325,65 @@ export class GameEngine {
     this.baseParticleScale = opts.particleScale;
     this.fx.scale = opts.particleScale;
     this.audio.muted = opts.muted;
+    this.qualityMode = opts.qualityMode ?? (opts.autoQuality ? 'auto' : 'high');
+    this.quality = this.initialQuality();
+    this.fx.setQuality(this.quality);
+    this.fx.scale = this.baseParticleScale * this.qualityParticleMult();
+    try {
+      this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      if (this.reducedMotion) this.opts.shakeEnabled = false;
+    } catch {
+      this.reducedMotion = false;
+    }
+  }
+
+  /** v6: keep fighting past wave 20 — endless scaling + score fever */
+  continueEndless(): void {
+    if (this.victoryT < 0 || this.endless) return;
+    this.endless = true;
+    this.victoryT = -1;
+    this.gameOverSent = false;
+    this.paused = false;
+    this.upgradeLock = false;
+    this.intermission = 3;
+    this.waveBannerT = 2.2;
+    this.setAnnounce('♾️ حالت بی‌پایان! امتیاز ×۱.۵ — تا کجا می‌روی؟', 3, 3);
+    this.audio.waveStart();
+    this.grantAchievement('endless1');
+    this.last = performance.now();
+  }
+
+  get isEndless(): boolean {
+    return this.endless;
+  }
+
+  /** weak-device sniff: few cores / little RAM / mobile / small screen → start lower, no shame */
+  private initialQuality(): number {
+    if (this.qualityMode === 'high') return 0;
+    if (this.qualityMode === 'balanced') return 1;
+    if (this.qualityMode === 'performance') return 2;
+    if (this.qualityMode === 'potato') return 3;
+    try {
+      const nav = navigator as Navigator & { deviceMemory?: number };
+      const cores = nav.hardwareConcurrency ?? 8;
+      const mem = nav.deviceMemory ?? 8;
+      const mobile = /android|iphone|ipad|mobile/i.test(nav.userAgent ?? '');
+      const small = Math.min(window.innerWidth, window.innerHeight) < 700;
+      if (cores <= 4 || mem <= 4) return 2;
+      if (mobile || small) return 1;
+    } catch {
+      /* ignore */
+    }
+    return 0;
+  }
+
+  private qualityParticleMult(): number {
+    return this.quality === 0 ? 1 : this.quality === 1 ? 0.7 : this.quality === 2 ? 0.45 : 0.28;
+  }
+
+  private enemyCap(): number {
+    const base = Math.min(150, 16 + this.wave * 6);
+    return this.quality === 0 ? base : this.quality === 1 ? Math.min(base, 130) : this.quality === 2 ? Math.min(base, 110) : Math.min(base, 90);
   }
 
   setVolumes(music: number, sfx: number): void {
@@ -378,8 +465,7 @@ export class GameEngine {
   setParticleScale(s: number): void {
     this.opts.particleScale = s;
     this.baseParticleScale = s;
-    const mult = this.quality === 0 ? 1 : this.quality === 1 ? 0.6 : 0.35;
-    this.fx.scale = s * mult;
+    this.fx.scale = s * this.qualityParticleMult();
   }
 
   setShakeEnabled(b: boolean): void {
@@ -391,6 +477,7 @@ export class GameEngine {
     applyUpgrade(this.stats, id);
     if (id === 'maxhp') this.hp = Math.min(this.stats.maxHp, this.hp + 25);
     if (id === 'orbital' && this.stats.orbitals >= 3) this.grantAchievement('orbital3');
+    if (id === 'chain') this.grantAchievement('chainlord');
     this.taken.set(id, (this.taken.get(id) ?? 0) + 1);
     this.audio.upgradePick();
     this.fx.shockwave(this.px, this.py, '#a3ff12', 160, 0.5, 5);
@@ -454,7 +541,7 @@ export class GameEngine {
     this.fireCd = 0.1;
     this.dashCd = 0; this.dashT = 0; this.invuln = 0;
     this.time = 0; this.kills = 0; this.elites = 0; this.score = 0;
-    this.level = 1; this.xp = 0; this.xpNext = 30;
+    this.level = 1; this.xp = 0; this.xpNext = 26;
     this.combo = 0; this.comboT = 0; this.maxCombo = 0;
     this.wave = 1;
     this.waveKills = 0;
@@ -486,6 +573,9 @@ export class GameEngine {
     this.moveTrailAcc = 0; this.rerollsLeft = 1;
     this.victoryT = -1; this.deathBy = null;
     this.dashKickX = 0; this.dashKickY = 0;
+    this.endless = false; this.endlessAnn = false;
+    this.chainCd = 2; this.stormT = 3; this.stormWarn = null;
+    this.frameCount = 0; this.stingerKills = 0;
     this.qualityT = 0; this.goodT = 0;
     this.gridPulse = 0; this.orbitalAngle = 0;
     this.deathT = -1;
@@ -500,7 +590,8 @@ export class GameEngine {
   }
 
   private quotaFor(w: number): number {
-    return Math.round((6 + w * 4.5) * DIFF[this.opts.difficulty].quota);
+    // v7: snappier early waves — faster clears, faster rewards
+    return Math.round((5 + w * 4.2) * DIFF[this.opts.difficulty].quota);
   }
 
   // ---------- v2.1 helpers: spatial grid, pooling, achievements ----------
@@ -731,8 +822,9 @@ export class GameEngine {
     const h = parent ? parent.clientHeight : window.innerHeight;
     this.viewW = Math.max(320, w);
     this.viewH = Math.max(320, h);
-    // DPR cap follows auto-quality level (0:2, 1:1.5, 2:1.15)
-    const cap = this.quality === 0 ? 2 : this.quality === 1 ? 1.5 : 1.15;
+    // DPR cap follows quality: cinematic 2x, balanced 1.5x, performance 1.2x, potato 1x
+    // (biggest fill-rate win on weak iGPUs — halves pixels to shade)
+    const cap = this.quality === 0 ? 2 : this.quality === 1 ? 1.5 : this.quality === 2 ? 1.2 : 1;
     this.dpr = Math.min(cap, window.devicePixelRatio || 1);
     this.canvas.width = Math.round(this.viewW * this.dpr);
     this.canvas.height = Math.round(this.viewH * this.dpr);
@@ -755,9 +847,24 @@ export class GameEngine {
 
   setAutoQuality(on: boolean): void {
     this.opts.autoQuality = on;
+    this.qualityMode = on ? 'auto' : 'high';
     if (!on && this.quality !== 0) {
       this.quality = 0;
       this.applyQuality();
+    }
+  }
+
+  setQualityMode(m: 'auto' | 'high' | 'balanced' | 'performance' | 'potato'): void {
+    this.qualityMode = m;
+    this.opts.autoQuality = m === 'auto';
+    this.opts.qualityMode = m;
+    const target = m === 'auto' ? this.initialQuality() : m === 'high' ? 0 : m === 'balanced' ? 1 : m === 'performance' ? 2 : 3;
+    if (target !== this.quality) {
+      this.quality = target;
+      this.goodT = 0;
+      this.qualityT = 0;
+      this.applyQuality();
+      this.emitHud();
     }
   }
 
@@ -795,9 +902,10 @@ export class GameEngine {
   }
 
   private applyQuality(): void {
-    // particle scale steps: 1x / 0.6x / 0.35x of the user's base setting
-    const mult = this.quality === 0 ? 1 : this.quality === 1 ? 0.6 : 0.35;
-    this.fx.scale = this.baseParticleScale * mult;
+    // particle scale steps: 1x / 0.7x / 0.45x / 0.28x of the user's base setting
+    // juice survives because core flashes + shockwaves are kept, only satellites shrink
+    this.fx.scale = this.baseParticleScale * this.qualityParticleMult();
+    this.fx.setQuality(this.quality);
     this.resize(); // re-applies DPR cap + gradient cache
   }
 
@@ -844,24 +952,25 @@ export class GameEngine {
   }
 
   private updateQuality(raw: number): void {
-    if (!this.opts.autoQuality) return;
+    if (this.qualityMode !== 'auto') return;
     this.qualityT += raw;
-    if (this.qualityT < 2) return;
+    // react fast on drops (1s), recover slowly (8s) — no oscillation on borderline rigs
+    if (this.qualityT < 1) return;
     this.qualityT = 0;
-    if (this.fpsEMA < 45 && this.quality < 2) {
+    if (this.fpsEMA < 47 && this.quality < 3) {
       this.quality += 1;
       this.goodT = 0;
       this.applyQuality();
       this.emitHud();
-    } else if (this.fpsEMA > 58 && this.quality > 0) {
-      this.goodT += 2;
-      if (this.goodT >= 6) {
+    } else if (this.fpsEMA > 57 && this.quality > 0) {
+      this.goodT += 1;
+      if (this.goodT >= 8) {
         this.goodT = 0;
         this.quality -= 1;
         this.applyQuality();
         this.emitHud();
       }
-    } else {
+    } else if (this.fpsEMA <= 57) {
       this.goodT = 0;
     }
   }
@@ -873,13 +982,20 @@ export class GameEngine {
       dots.push({ x: this.boss.x, y: this.boss.y, kind: 'boss' });
     }
     const maxDots = 64;
-    const foes = this.enemies.filter((e) => e !== this.boss);
-    const step = Math.max(1, Math.floor(foes.length / maxDots));
-    for (let i = 0; i < foes.length; i += step) {
-      const e = foes[i];
+    // v6: no .filter allocation — stride-sample live enemies directly
+    const liveCount = this.boss ? this.enemies.length - 1 : this.enemies.length;
+    const step = Math.max(1, Math.floor(Math.max(0, liveCount) / maxDots));
+    let skipped = 0;
+    for (let i = 0; i < this.enemies.length; i += step) {
+      const e = this.enemies[i];
+      if (e === this.boss) {
+        skipped++;
+        continue;
+      }
       dots.push({ x: e.x, y: e.y, kind: e.kind, elite: e.elite });
       if (dots.length >= maxDots + 1) break;
     }
+    void skipped;
     // sampled gem dots so farming is no longer blind
     if (this.gems.length > 0) {
       const gstep = Math.max(1, Math.floor(this.gems.length / 12));
@@ -931,6 +1047,8 @@ export class GameEngine {
       mods: {
         nova: this.taken.get('nova') ?? 0,
         seeker: this.taken.get('seeker') ?? 0,
+        chain: this.taken.get('chain') ?? 0,
+        phasedive: this.taken.get('phasedive') ?? 0,
         secondwind: (this.taken.get('secondwind') ?? 0) > 0,
         swCd: Math.max(0, this.swCd),
       },
@@ -991,7 +1109,8 @@ export class GameEngine {
     }
 
     this.time += dt;
-    this.score += dt * (2 + this.wave * 0.6);
+    this.frameCount++;
+    this.score += dt * (2 + this.wave * 0.6) * (this.endless ? 1.5 : 1);
     this.pityT += dt;
     if (this.time >= 300 && !this.announced5min) {
       this.announced5min = true;
@@ -1085,7 +1204,7 @@ export class GameEngine {
   /** shared run-end bookkeeping for death AND victory (victory pays a shard bonus) */
   private sendResult(victory: boolean): void {
     const upgrades = [...this.taken.keys()];
-    const score = Math.floor(this.score + (victory ? 2500 : 0));
+    const score = Math.floor(this.score + (victory && !this.endless ? 2500 : 0));
     this.score = score;
     const isBest = saveBest(score) || false;
     pushBoard({
@@ -1094,7 +1213,17 @@ export class GameEngine {
     });
     addTotals(this.kills, this.time, this.wave);
     if (victory) this.shards += 10;
+    if (this.endless) this.shards += 5;
     addShards(this.shards);
+    try {
+      pushRun({
+        score, wave: this.wave, kills: this.kills,
+        time: Math.floor(this.time), ship: this.opts.ship, date: Date.now(),
+        victory, endless: this.endless,
+      });
+    } catch {
+      /* storage unavailable */
+    }
     const result: GameResult = {
       score,
       kills: this.kills,
@@ -1110,6 +1239,7 @@ export class GameEngine {
       shards: this.shards,
       powerups: this.powerupsCollected,
       victory,
+      endless: this.endless,
       deathBy: victory ? null : this.deathBy,
     };
     if (victory) {
@@ -1149,11 +1279,12 @@ export class GameEngine {
       this.pvx = this.dashDx * power;
       this.pvy = this.dashDy * power;
       this.fx.trail(this.px, this.py, '#00f0ff');
-      this.fx.trail(this.px, this.py, '#ff2d78');
+      this.fx.trail(this.px, this.py, '#ffffff');
+      this.fx.trail(this.px, this.py, this.shipColor());
       this.ghostAcc -= dt;
       if (this.ghostAcc <= 0) {
-        this.ghostAcc = 0.03;
-        this.ghosts.push({ x: this.px, y: this.py, aim: this.aim, life: 0.35 });
+        this.ghostAcc = 0.025;
+        this.ghosts.push({ x: this.px, y: this.py, aim: this.aim, life: 0.4 });
       }
     } else {
       const sp = this.stats.moveSpeed * (berserk ? 1.5 : 1);
@@ -1162,13 +1293,14 @@ export class GameEngine {
       const k = Math.min(1, dt * 10);
       this.pvx += (tx - this.pvx) * k;
       this.pvy += (ty - this.pvy) * k;
-      // v3.2: speed trail — moving fast leaves ion sparks in ship color
+      // speed trail — moving fast leaves ion sparks in ship color
       const spd = Math.hypot(this.pvx, this.pvy);
-      if (spd > 300) {
+      if (spd > 260) {
         this.moveTrailAcc -= dt;
         if (this.moveTrailAcc <= 0) {
-          this.moveTrailAcc = 0.05;
+          this.moveTrailAcc = 0.03;
           this.fx.trail(this.px, this.py, this.shipColor());
+          if (spd > 520) this.fx.trail(this.px, this.py, '#ffffff');
         }
       }
     }
@@ -1224,6 +1356,27 @@ export class GameEngine {
     return best;
   }
 
+  private nearestEnemies(x: number, y: number, maxD: number, count: number): Enemy[] {
+    const maxD2 = maxD * maxD;
+    const out: { e: Enemy; d: number }[] = [];
+    for (const e of this.enemies) {
+      if (e.hp <= 0 || e.spawnT > 0) continue;
+      const d = dist2(x, y, e.x, e.y);
+      if (d > maxD2) continue;
+      // tiny insertion sort — count <= 9 so this is cheaper than Array.sort
+      let i = out.length;
+      out.push({ e, d });
+      while (i > 0 && out[i].d < out[i - 1].d) {
+        const tmp = out[i];
+        out[i] = out[i - 1];
+        out[i - 1] = tmp;
+        i--;
+      }
+      if (out.length > count) out.pop();
+    }
+    return out.map((o) => o.e);
+  }
+
   private fireVolley(): void {
     const n = this.stats.multishot;
     const base = this.aim;
@@ -1239,7 +1392,7 @@ export class GameEngine {
       b.y = this.py + Math.sin(a) * 20;
       b.vx = Math.cos(a) * sp + this.pvx * 0.25;
       b.vy = Math.sin(a) * sp + this.pvy * 0.25;
-      b.r = crit ? 6 : 4.5;
+      b.r = crit ? 6.5 : 5;
       b.dmg = dmg;
       b.pierce = this.stats.pierce;
       b.life = 1.4;
@@ -1247,6 +1400,7 @@ export class GameEngine {
       this.bullets.push(b);
     }
     this.fx.muzzle(this.px + Math.cos(base) * 22, this.py + Math.sin(base) * 22, base, '#00f0ff');
+    this.fx.muzzle(this.px + Math.cos(base) * 22, this.py + Math.sin(base) * 22, base, '#ffffff');
     this.audio.shoot();
   }
 
@@ -1269,6 +1423,21 @@ export class GameEngine {
         } else {
           this.rollMutator();
         }
+        // v7 hook: wave 2 opens with a guaranteed elite + welcome powerup
+        if (this.wave === 2) {
+          const p = this.spawnPos();
+          const e = this.makeEnemy('chaser', p.x, p.y);
+          e.spawnT = 0.7;
+          e.elite = true;
+          e.hp = e.maxHp = Math.round(e.maxHp * 3.2);
+          e.xp *= 5;
+          e.score *= 4;
+          e.r *= 1.22;
+          this.enemies.push(e);
+          this.fx.text(p.x, p.y - 24, 'ELITE! 🎁', '#ffd319', 16);
+          this.dropPowerup(this.px + 120, this.py - 80, false);
+          this.setAnnounce('🎁 الیت اول + هدیه — بزنش!', 2.4, 2);
+        }
         if (this.wave >= 10) this.grantAchievement('wave10');
       }
       return;
@@ -1276,7 +1445,7 @@ export class GameEngine {
     const d = DIFF[this.opts.difficulty];
     this.spawnT -= dt;
     const aliveWeight = this.enemies.length;
-    const cap = Math.min(150, 16 + this.wave * 6);
+    const cap = this.enemyCap();
     if (this.spawnT <= 0 && aliveWeight < cap && this.waveKills < this.waveQuota) {
       // v3.2: snappier early game — denser spawns from wave 3
       let interval = Math.max(0.1, (rand(0.4, 0.85) - this.wave * 0.055) * d.interval);
@@ -1291,11 +1460,11 @@ export class GameEngine {
       this.score += 100 * this.wave;
       this.hp = Math.min(this.stats.maxHp, this.hp + this.stats.maxHp * 0.12);
       this.magnetAllT = Math.max(this.magnetAllT, 1.6);
-      if (this.wave >= WIN_WAVE) {
+      if (this.wave >= WIN_WAVE && !this.endless) {
         // ★ VICTORY — the void is conquered. Endless continues after the screen.
         this.victoryT = 0;
         this.slowmoT = Math.max(this.slowmoT, 1.2);
-        this.trauma = Math.min(1, this.trauma + 0.4);
+        this.trauma = this.reducedMotion ? 0 : Math.min(1, this.trauma + 0.4);
         this.fx.shockwave(this.px, this.py, '#f2e6c8', 420, 1, 7);
         this.fx.explosion(this.px, this.py, '#f2e6c8', 60, 520);
         this.setAnnounce(`✦ پیروزی! خلأ در موج ${WIN_WAVE} رام شد (+10 ◇)`, 3, 3);
@@ -1304,14 +1473,54 @@ export class GameEngine {
         this.emitHud();
         return;
       }
-      this.setAnnounce(`موج ${this.wave} پاکسازی شد! +${100 * this.wave}`, 2, 1);
-      if (this.wave === WIN_WAVE - 1) {
+      if (this.endless && !this.endlessAnn) {
+        this.endlessAnn = true;
+      }
+      if (this.mutator === 'voidstorm') this.grantAchievement('stormrider');
+      const endlessTag = this.endless ? ' ♾️×۱.۵' : '';
+      this.setAnnounce(`موج ${this.wave} پاکسازی شد! +${100 * this.wave}${endlessTag}`, 2, 1);
+      if (!this.endless && this.wave === WIN_WAVE - 1) {
         this.setAnnounce(`موج ${this.wave} پاکسازی شد! یک موج تا پیروزی…`, 2.4, 2);
       }
       this.fx.shockwave(this.px, this.py, '#ffd319', 200, 0.6, 5);
       this.audio.levelup();
       this.intermission = 2.0;
       this.emitHud();
+    }
+    // v6 voidstorm: telegraphed lightning — hurts everyone, dodge the ring
+    if (this.mutator === 'voidstorm' && this.deathT < 0 && this.victoryT < 0) {
+      this.stormT -= dt;
+      if (!this.stormWarn && this.stormT <= 0.8 && this.stormT > 0) {
+        const sx = clamp(this.px + rand(-260, 260), 40, WORLD_W - 40);
+        const sy = clamp(this.py + rand(-200, 200), 40, WORLD_H - 40);
+        this.stormWarn = { x: sx, y: sy, t: 0.8 };
+        this.fx.text(sx, sy - 30, '⚡', '#5df2ff', 22);
+      }
+      if (this.stormWarn) {
+        this.stormWarn.t -= dt;
+        if (this.stormWarn.t <= 0) {
+          const { x: sx, y: sy } = this.stormWarn;
+          this.stormWarn = null;
+          this.stormT = Math.max(1.6, 3.2 - this.wave * 0.06);
+          this.fx.shockwave(sx, sy, '#5df2ff', 150, 0.4, 6);
+          this.fx.explosion(sx, sy, '#5df2ff', 26, 480);
+          this.audio.nova();
+          if (!this.reducedMotion) this.trauma = Math.min(1, this.trauma + 0.25);
+          // hurts player if standing in it
+          if (dist2(sx, sy, this.px, this.py) < 95 * 95) {
+            this.damagePlayer(18 + this.wave, sx, sy, 'طوفان خلأ');
+          }
+          // and melts enemies too — risk/reward kiting
+          for (const e of this.enemies) {
+            if (e.hp > 0 && e.spawnT <= 0 && dist2(sx, sy, e.x, e.y) < 130 * 130) {
+              this.damageEnemy(e, 60 + this.wave * 4, false, e.x - sx, e.y - sy);
+            }
+          }
+          this.sweepDeadEnemies();
+        }
+      }
+    } else {
+      this.stormWarn = null;
     }
   }
 
@@ -1321,7 +1530,7 @@ export class GameEngine {
       this.mutator = null;
       return;
     }
-    const kinds: MutatorKind[] = ['swarm', 'snipers', 'elite_hunt', 'surge', 'gold_rush'];
+    const kinds: MutatorKind[] = ['swarm', 'snipers', 'elite_hunt', 'surge', 'gold_rush', 'voidstorm'];
     this.mutator = kinds[Math.floor(Math.random() * kinds.length)];
     const def = MUTATORS[this.mutator];
     this.setAnnounce(`🌀 موتاتور: ${def.nameFa}! (امتیاز ×${def.scoreMult})`, 2.6, 2);
@@ -1368,11 +1577,11 @@ export class GameEngine {
     if (w >= 2) bag.push('weaver', 'weaver');
     if (w >= 3) bag.push('dasher', 'dasher');
     if (w >= 4) bag.push('shooter', 'lancer');
-    if (w >= 5) bag.push('splitter');
-    if (w >= 6) bag.push('shooter', 'dasher', 'sniper', 'hive');
-    if (w >= 7) bag.push('tank', 'lancer');
+    if (w >= 5) bag.push('splitter', 'stinger');
+    if (w >= 6) bag.push('shooter', 'dasher', 'sniper', 'hive', 'stinger');
+    if (w >= 7) bag.push('tank', 'lancer', 'stinger');
     if (w >= 8) bag.push('splitter', 'weaver', 'sniper');
-    if (w >= 10) bag.push('tank', 'shooter');
+    if (w >= 10) bag.push('tank', 'shooter', 'stinger');
     return bag[Math.floor(Math.random() * bag.length)];
   }
 
@@ -1383,7 +1592,9 @@ export class GameEngine {
 
   private makeEnemy(kind: EnemyKind, x: number, y: number): Enemy {
     const d = DIFF[this.opts.difficulty];
-    const wScale = 1 + (this.wave - 1) * 0.13 + Math.max(0, this.time / 240) * 0.25;
+    const endlessMult = this.endless ? 1 + Math.max(0, this.wave - WIN_WAVE) * 0.16 : 1;
+    // v7: gentler early scaling so the player feels strong fast
+    const wScale = (1 + (this.wave - 1) * 0.115 + Math.max(0, this.time / 240) * 0.25) * endlessMult;
     const base: Enemy = {
       id: this.nextId++, kind, x, y, vx: 0, vy: 0,
       r: 16, hp: 30, maxHp: 30, speed: 130, dmg: 12,
@@ -1456,6 +1667,13 @@ export class GameEngine {
         base.dmg = 16 * d.dmg;
         base.xp = 30; base.score = 150; base.r = 30;
         base.fireCd = 2.5; // doubles as mini-spawn timer
+        break;
+      case 'stinger':
+        base.hp = base.maxHp = 28 * wScale * d.hp;
+        base.speed = 235 * d.speed;
+        base.dmg = 9 * d.dmg;
+        base.xp = 12; base.score = 70; base.r = 13;
+        base.fireCd = rand(0.8, 1.4);
         break;
       case 'boss': {
         const mult = 1 + (this.wave / 5 - 1) * 0.9;
@@ -1548,9 +1766,11 @@ export class GameEngine {
   }
 
   private updateBullets(dt: number): void {
+    // homing retarget every 3rd frame — 3x fewer O(n) scans, same feel
+    const retarget = this.frameCount % 3 === 0;
     for (const b of this.bullets) {
       // seeker missiles steer toward the nearest enemy (limited turn rate)
-      if (b.homing && !b.dead) {
+      if (b.homing && !b.dead && retarget) {
         const tgt = this.nearestEnemyFrom(b.x, b.y, 1100);
         if (tgt) {
           const want = Math.atan2(tgt.y - b.y, tgt.x - b.x);
@@ -1558,7 +1778,7 @@ export class GameEngine {
           let d = want - cur;
           while (d > Math.PI) d -= TAU;
           while (d < -Math.PI) d += TAU;
-          const turn = 6 * dt;
+          const turn = 6 * dt * 3;
           const na = cur + clamp(d, -turn, turn);
           const sp = Math.hypot(b.vx, b.vy) || 1;
           b.vx = Math.cos(na) * sp;
@@ -1772,6 +1992,45 @@ export class GameEngine {
           e.vy += (Math.sin(ang) * e.speed - e.vy) * Math.min(1, dt * 1.8);
           break;
         }
+        case 'stinger': {
+          // v6: fast skirmisher — strafes close then unloads a 3-round burst
+          const want = 300;
+          const dir = dist > want + 60 ? 1 : dist < want - 60 ? -1 : 0;
+          const strafeAng = ang + Math.PI / 2 * e.strafe;
+          const tx = Math.cos(ang) * dir * e.speed + Math.cos(strafeAng) * e.speed * 0.8;
+          const ty = Math.sin(ang) * dir * e.speed + Math.sin(strafeAng) * e.speed * 0.8;
+          e.vx += (tx - e.vx) * Math.min(1, dt * 3.5);
+          e.vy += (ty - e.vy) * Math.min(1, dt * 3.5);
+          if (Math.random() < dt * 0.6) e.strafe *= -1;
+          e.stateT -= dt;
+          if (e.state === 0 && e.fireCd <= 0 && dist < 560) {
+            e.state = 1;
+            e.stateT = 0.45;
+            e.lockDx = Math.cos(ang);
+            e.lockDy = Math.sin(ang);
+          } else if (e.state === 1) {
+            e.lockDx = Math.cos(ang);
+            e.lockDy = Math.sin(ang);
+            if (e.stateT <= 0) {
+              e.state = 2;
+              e.stateT = 0.32;
+              // 3-round burst with slight spread
+              for (let k = -1; k <= 1; k++) {
+                const a = Math.atan2(e.lockDy, e.lockDx) + k * 0.12;
+                                const sp = 420 + this.wave * 8;
+                this.fireEnemyBullet(e.x, e.y, Math.cos(a) * sp, Math.sin(a) * sp, 5, e.dmg, 2.4);
+              }
+              this.audio.enemyShoot();
+              this.fx.muzzle(e.x, e.y, Math.atan2(e.lockDy, e.lockDx), '#5df2ff');
+            }
+          } else if (e.state === 2) {
+            if (e.stateT <= 0) {
+              e.state = 0;
+              e.fireCd = rand(1.4, 2.2);
+            }
+          }
+          break;
+        }
         case 'boss': {
           const enraged = e.hp < e.maxHp * 0.32;
           // v3: boss tiers — every 5 waves the boss fights dirtier
@@ -1858,9 +2117,10 @@ export class GameEngine {
       e.y = clamp(e.y + e.vy * dt, e.r, WORLD_H - e.r);
     }
 
-    // separation (cheap, capped — uses squared early-out, no sqrt unless overlapping)
+    // separation (cheap, capped — temporal LOD on low quality: every 2nd frame)
     const n = this.enemies.length;
-    if (n > 1 && n <= 170) {
+    const sepSkip = this.quality >= 2 && this.frameCount % 2 === 1;
+    if (n > 1 && n <= 170 && !sepSkip) {
       const sepK = Math.min(1, dt * 60);
       for (let i = 0; i < n; i++) {
         const a = this.enemies[i];
@@ -1920,8 +2180,20 @@ export class GameEngine {
     }
     // enemies vs player (only nearby cells around the player)
     const thorns = thornsDamage(this.taken);
-    this.forEachNear(this.px, this.py, 96, (e) => {
+    const diveStacks = this.taken.get('phasedive') ?? 0;
+    const diving = diveStacks > 0 && this.dashT > 0;
+    const diveDmg = diving ? this.stats.damage * (2 + diveStacks) : 0;
+    this.forEachNear(this.px, this.py, diving ? 130 : 96, (e) => {
       if (e.spawnT > 0) return; // phasing in: harmless
+      // v6 phasedive: dash through enemies to shred them (uses orbHitCd as per-enemy gate)
+      if (diving && e.hp > 0 && e.orbHitCd <= 0) {
+        const drr = e.r + 34;
+        if (dist2(e.x, e.y, this.px, this.py) < drr * drr) {
+          e.orbHitCd = 0.25;
+          this.damageEnemy(e, diveDmg, false, this.dashDx * 500, this.dashDy * 500);
+          this.fx.hitSpark(e.x, e.y, Math.atan2(this.dashDy, this.dashDx), '#5df2ff');
+        }
+      }
       const rr = e.r + pr - 2;
       if (dist2(e.x, e.y, this.px, this.py) < rr * rr) {
         this.damagePlayer(e.dmg, e.x, e.y, ENEMY_FA[e.kind]);
@@ -1978,11 +2250,15 @@ export class GameEngine {
     const kb = e.kind === 'boss' ? 12 : e.kind === 'tank' || e.kind === 'hive' ? 35 : 130;
     e.kx += (vx / l) * kb;
     e.ky += (vy / l) * kb;
-    this.fx.explosion(e.x, e.y, ENEMY_COLOR[e.kind], crit ? 7 : 3, 200);
+    // potato: hit explosion only on crits — chip hits stay silent for FPS
+    if (this.quality <= 2 || crit) {
+      this.fx.explosion(e.x, e.y, ENEMY_COLOR[e.kind], crit ? 9 : 4, crit ? 320 : 220);
+    }
+    if (crit && this.quality <= 2) this.fx.hitSpark(e.x, e.y, Math.atan2(vy, vx), '#ffe9a8');
     const showNums = this.opts.showDamageNumbers !== false;
     if (crit || dmg >= 30) {
-      this.fx.text(e.x, e.y - e.r, String(Math.round(dmg)), crit ? '#f2e6c8' : '#e8ecf5', crit ? 15 : 12);
-    } else if (showNums) {
+      this.fx.text(e.x, e.y - e.r, String(Math.round(dmg)), crit ? '#ffe066' : '#ffffff', crit ? 18 : 13);
+    } else if (showNums && this.quality <= 1) {
       // chaos throttle: in heavy fights chip numbers would starve crits from the pool
       const chaos = this.enemies.length > 40 || this.fpsEMA < 50;
       if (!chaos || Math.random() < 0.4) {
@@ -1990,7 +2266,7 @@ export class GameEngine {
       }
     }
     if (e.hp <= 0) {
-      this.hitstopT = Math.max(this.hitstopT, e.kind === 'boss' ? 0.1 : e.elite ? 0.06 : 0.02);
+      this.hitstopT = Math.max(this.hitstopT, e.kind === 'boss' ? 0.16 : e.elite ? 0.09 : 0.028);
     }
   }
 
@@ -2003,10 +2279,15 @@ export class GameEngine {
     if (this.combo >= 5) this.audio.comboTick(this.combo);
     const comboMult = 1 + Math.min(2 + (this.taken.get('combomaster') ?? 0), this.combo * 0.02 * comboScoreMult(this.taken));
     const mutMult = this.mutator ? MUTATORS[this.mutator].scoreMult : 1;
-    const pts = e.score * (1 + this.wave * 0.08) * comboMult * mutMult;
+    const endlessMult = this.endless ? 1.5 : 1;
+    const pts = e.score * (1 + this.wave * 0.08) * comboMult * mutMult * endlessMult;
     this.score += pts;
     if (this.kills === 1) this.grantAchievement('first_blood');
     if (this.combo === 50) this.grantAchievement('combo50');
+    if (e.kind === 'stinger') {
+      this.stingerKills++;
+      if (this.stingerKills === 15) this.grantAchievement('stinger15');
+    }
     if (e.elite) {
       this.elites += 1;
       if (this.elites === 5) this.grantAchievement('elite5');
@@ -2023,12 +2304,21 @@ export class GameEngine {
     }
 
     const big = e.kind === 'boss' || e.kind === 'splitter' || e.kind === 'tank' || e.kind === 'hive' || e.elite;
-    this.fx.explosion(e.x, e.y, e.elite ? '#ffd319' : ENEMY_COLOR[e.kind], big ? 42 : 16, big ? 460 : 320);
-    this.fx.shockwave(e.x, e.y, e.elite ? '#ffd319' : ENEMY_COLOR[e.kind], big ? 190 : 70, 0.4, big ? 6 : 3);
-    this.gridPulse = Math.min(1, this.gridPulse + (e.kind === 'boss' ? 1 : e.elite ? 0.5 : 0.12));
+    this.fx.explosion(e.x, e.y, e.elite ? '#ffd319' : ENEMY_COLOR[e.kind], big ? 60 : 24, big ? 620 : 420);
+    this.fx.shockwave(e.x, e.y, e.elite ? '#ffd319' : ENEMY_COLOR[e.kind], big ? 230 : 95, 0.5, big ? 8 : 4);
+    if (big) this.fx.shockwave(e.x, e.y, '#ffffff', big ? 130 : 55, 0.35, 3);
+    if (e.kind === 'boss') {
+      this.fx.confetti(e.x, e.y, 90);
+      this.fx.shockwave(e.x, e.y, '#ff2d78', 320, 0.7, 10);
+    } else if (e.elite) {
+      this.fx.text(e.x, e.y - 14, `+${Math.round(pts)}`, '#ffd319', 18);
+    } else if (this.combo >= 10 && this.combo % 10 === 0) {
+      this.fx.text(e.x, e.y - 18, `COMBO ×${this.combo}`, '#ff9f1c', 16);
+    }
+    this.gridPulse = Math.min(1, this.gridPulse + (e.kind === 'boss' ? 1 : e.elite ? 0.65 : 0.18));
     if (e.elite) this.audio.eliteDie();
     else this.audio.enemyDie(big);
-    this.trauma = Math.min(1, this.trauma + (e.kind === 'boss' ? 0.8 : e.elite ? 0.4 : e.kind === 'splitter' ? 0.22 : 0.08));
+    this.trauma = Math.min(1, this.trauma + (e.kind === 'boss' ? 1 : e.elite ? 0.55 : e.kind === 'splitter' ? 0.3 : 0.12));
 
     if (e.kind === 'boss') {
       this.slowmoT = 1.0;
@@ -2043,14 +2333,14 @@ export class GameEngine {
         this.gems.push({
           x: e.x + rand(-40, 40), y: e.y + rand(-40, 40),
           vx: rand(-220, 220), vy: rand(-220, 220),
-          val: 12, t: 0,
+          val: 14, t: 0,
         });
       }
       this.boss = null;
     } else {
-      // gems (doubled during gold rush; echo elites drop double again)
+      // gems (doubled during gold rush; echo elites drop double again; v7 +20% base)
       const echoMult = e.affix === 'echo' ? 2 : 1;
-      const gemVal = e.xp * (this.mutator === 'gold_rush' ? 2 : 1) * echoMult;
+      const gemVal = Math.ceil(e.xp * 1.2 * (this.mutator === 'gold_rush' ? 2 : 1) * echoMult);
       const parts = e.xp >= 10 ? 3 : 1;
       for (let i = 0; i < parts; i++) {
         this.gems.push({
@@ -2071,10 +2361,10 @@ export class GameEngine {
         this.hives += 1;
         if (this.hives === 3) this.grantAchievement('hive_cleanser');
       }
-      // powerup drop: elites always, others 2%
+      // powerup drop: elites always, others 3% (v7: more toys)
       if (e.elite) {
         this.dropPowerup(e.x, e.y, false);
-      } else if (Math.random() < 0.02) {
+      } else if (Math.random() < 0.03) {
         this.dropPowerup(e.x, e.y, false);
       }
     }
@@ -2082,9 +2372,16 @@ export class GameEngine {
     if (this.stats.lifesteal > 0) {
       this.hp = Math.min(this.stats.maxHp, this.hp + this.stats.lifesteal);
     }
+    // v7 combo milestones: hype text + real rewards so streaks feel amazing
     if (this.combo > 0 && this.combo % 25 === 0) {
-      this.setAnnounce(`کمبو ×${this.combo}!`, 1.8);
-      this.fx.text(this.px, this.py - 34, `COMBO x${this.combo}`, '#00f0ff', 20);
+      const bonus = 50 + this.combo * 2;
+      this.score += bonus;
+      this.hp = Math.min(this.stats.maxHp, this.hp + 8);
+      const hype = this.combo >= 100 ? `🔥🔥 کمبو ×${this.combo} افسانه‌ای! +${bonus}` : this.combo >= 50 ? `🔥 کمبو ×${this.combo}! +${bonus}` : `کمبو ×${this.combo}! +${bonus}`;
+      this.setAnnounce(hype, 2);
+      this.fx.text(this.px, this.py - 34, `COMBO x${this.combo}  +8 HP`, '#ffd319', 22);
+      this.fx.shockwave(this.px, this.py, '#ffd319', 160, 0.5, 5);
+      this.audio.comboTick(this.combo + 10);
     }
   }
 
@@ -2105,8 +2402,8 @@ export class GameEngine {
   }
 
   private updatePowerups(dt: number): void {
-    // v3.2 pity: never go 50s without a powerup — the game must keep giving toys
-    if (this.pityT > 50 && this.powerups.length < 3 && this.deathT < 0) {
+    // v7 pity: never go 35s without a powerup (was 50s) — the game must keep giving toys
+    if (this.pityT > 35 && this.powerups.length < 3 && this.deathT < 0) {
       const a = Math.random() * TAU;
       this.dropPowerup(
         clamp(this.px + Math.cos(a) * 220, 40, WORLD_W - 40),
@@ -2270,7 +2567,37 @@ export class GameEngine {
         this.audio.shoot();
       }
     }
+    // v6 chain storm: periodic lightning that arcs between closest enemies
+    const chainStacks = this.taken.get('chain') ?? 0;
+    if (chainStacks > 0) {
+      this.chainCd -= dt;
+      if (this.chainCd <= 0) {
+        this.chainCd = Math.max(2.2, 4.2 - chainStacks * 0.5);
+        const targets = this.nearestEnemies(this.px, this.py, 620, 3 + chainStacks * 2);
+        if (targets.length > 0) {
+          const dmg = this.stats.damage * (1.6 + chainStacks * 0.7);
+          let px = this.px;
+          let py = this.py;
+          for (const tgt of targets) {
+            this.fx.shockwave(tgt.x, tgt.y, '#5df2ff', 70, 0.3, 4);
+            this.fx.explosion(tgt.x, tgt.y, '#5df2ff', 8, 320);
+            // lightning segment feel: spark line from previous point
+            this.fx.hitSpark((px + tgt.x) / 2, (py + tgt.y) / 2, Math.atan2(tgt.y - py, tgt.x - px), '#ffffff');
+            this.damageEnemy(tgt, dmg, false, tgt.x - px, tgt.y - py);
+            px = tgt.x;
+            py = tgt.y;
+          }
+          this.audio.nova();
+          if (!this.reducedMotion) this.trauma = Math.min(1, this.trauma + 0.12);
+          this.sweepDeadEnemies();
+        } else {
+          this.chainCd = 0.5;
+        }
+      }
+    }
   }
+
+  /** k nearest live enemies for chain lightning (simple insertion, n is tiny) */
 
   private damagePlayer(raw: number, fromX: number, fromY: number, source: string | null = null): void {
     if (this.invuln > 0 || this.dashT > 0 || this.deathT >= 0 || this.victoryT >= 0) return;
@@ -2329,7 +2656,8 @@ export class GameEngine {
     while (this.xp >= this.xpNext) {
       this.xp -= this.xpNext;
       this.level += 1;
-      this.xpNext = Math.floor(this.xpNext * 1.22 + 16);
+      // v7: faster early levels — hook in the first 3 minutes
+      this.xpNext = Math.floor(this.xpNext * 1.18 + 14);
       this.pendingLevels += 1;
     }
     if (this.pendingLevels > 0 && !this.upgradeLock) {
@@ -2337,11 +2665,13 @@ export class GameEngine {
       this.paused = true;
       this.rerollsLeft = 1; // fresh reroll every level-up
       this.audio.levelup();
-      // level-up beam: stacked shockwaves + floating text
-      this.fx.shockwave(this.px, this.py, '#a3ff12', 220, 0.6, 5);
-      this.fx.shockwave(this.px, this.py, '#ffffff', 120, 0.4, 3);
-      this.fx.explosion(this.px, this.py, '#a3ff12', 24, 380);
-      this.fx.text(this.px, this.py - 40, `LEVEL ${this.level}!`, '#a3ff12', 22);
+      // v7 level-up celebration: beam + confetti + breather heal
+      this.hp = Math.min(this.stats.maxHp, this.hp + 10);
+      this.fx.shockwave(this.px, this.py, '#a3ff12', 240, 0.6, 6);
+      this.fx.shockwave(this.px, this.py, '#ffffff', 130, 0.4, 3);
+      this.fx.explosion(this.px, this.py, '#a3ff12', 28, 420);
+      this.fx.confetti(this.px, this.py, 24);
+      this.fx.text(this.px, this.py - 40, `LEVEL ${this.level}!  +10 HP`, '#a3ff12', 22);
       this.cb.onLevelUp(rollUpgrades(this.taken, 3));
       this.emitHud();
     }
@@ -2372,7 +2702,8 @@ export class GameEngine {
       }
     }
     // overflow: merge oldest gems into mega-gems (never delete player XP)
-    while (this.gems.length > 400) {
+    // v6: lower cap 280 (was 400) — fewer magnet sqrt checks on weak chips
+    while (this.gems.length > 280) {
       const a = this.gems.shift();
       const b = this.gems.shift();
       const c = this.gems.shift();
@@ -2418,37 +2749,53 @@ export class GameEngine {
     // bg (cached gradient — was allocated every frame)
     ctx.fillStyle = this.bgGrad ?? '#050514';
     ctx.fillRect(0, 0, this.viewW, this.viewH);
+    this.renderNow = performance.now();
 
     let shX = 0;
     let shY = 0;
     if (this.opts.shakeEnabled && this.trauma > 0) {
-      const s = this.trauma * this.trauma * 16;
+      // potato softens shake amplitude — feel stays, pixels don't fly
+      const amp = this.quality >= 3 ? 16 : 26;
+      const s = this.trauma * this.trauma * amp;
       shX = rand(-s, s);
       shY = rand(-s, s);
     }
     const camX = this.camX - shX;
     const camY = this.camY - shY;
+    const q = this.quality;
 
     // stars (screen space parallax)
     this.fx.drawStars(ctx, { x: camX, y: camY }, this.viewW, this.viewH);
 
-    // tasteful nebula — faint, slow, never competing with gameplay
+    // rich nebula — LOD: 5 blobs cinematic, 1 on potato (cheap, still pretty)
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const t = performance.now() / 1000;
-    drawGlow(ctx, '#16245e', this.viewW * 0.22 + Math.sin(t * 0.05) * 26, this.viewH * 0.28, 340, 0.32);
-    drawGlow(ctx, '#3d1038', this.viewW * 0.8 + Math.cos(t * 0.04) * 34, this.viewH * 0.66, 400, 0.28);
-    drawGlow(ctx, '#0a3340', this.viewW * 0.55, this.viewH * 0.9 + Math.sin(t * 0.045) * 22, 320, 0.26);
+    const t = this.renderNow / 1000;
+    const heat = q <= 1 ? Math.min(1, this.combo / 40) : 0;
+    drawGlow(ctx, '#1b2a7a', this.viewW * 0.22 + Math.sin(t * 0.05) * 26, this.viewH * 0.28, 380, q >= 3 ? 0.4 : 0.5);
+    drawGlow(ctx, '#5c1446', this.viewW * 0.8 + Math.cos(t * 0.04) * 34, this.viewH * 0.66, 440, q >= 3 ? 0.34 : 0.44);
+    if (q <= 2) {
+      drawGlow(ctx, '#0c4256', this.viewW * 0.55, this.viewH * 0.9 + Math.sin(t * 0.045) * 22, 360, 0.42);
+    }
+    if (q <= 1) {
+      drawGlow(ctx, '#3d1a78', this.viewW * 0.1 + Math.cos(t * 0.03) * 30, this.viewH * 0.75, 300, 0.35);
+      drawGlow(ctx, '#7a1e2e', this.viewW * 0.92, this.viewH * 0.12 + Math.sin(t * 0.06) * 18, 260, 0.3 + heat * 0.15);
+    }
+    // combo heat bloom at screen center — cinematic only (fill-rate hog)
+    if (heat > 0.05 && q === 0) {
+      drawGlow(ctx, '#ff9f1c', this.viewW / 2, this.viewH / 2, 420, heat * 0.12);
+    }
     ctx.restore();
 
     ctx.save();
     ctx.translate(-camX, -camY);
 
-    // grid — hairline, breathes only on big moments
+    // grid — neon hairline that breathes with combat (wider step on potato)
     const pulse = this.gridPulse;
-    ctx.strokeStyle = `rgba(148,178,255,${(0.05 + pulse * 0.16).toFixed(3)})`;
+    const bossPulse = this.boss && q <= 1 ? 0.04 + Math.sin(t * 3.2) * 0.02 : 0;
+    ctx.strokeStyle = `rgba(0,240,255,${(0.07 + pulse * 0.22 + bossPulse).toFixed(3)})`;
     ctx.lineWidth = 1;
-    const step = 100;
+    const step = q >= 3 ? 140 : 100;
     const x0 = Math.floor(camX / step) * step;
     const y0 = Math.floor(camY / step) * step;
     ctx.beginPath();
@@ -2462,30 +2809,38 @@ export class GameEngine {
     }
     ctx.stroke();
 
-    // arena border — quiet double hairline
-    ctx.strokeStyle = 'rgba(148,178,255,0.1)';
-    ctx.lineWidth = 6;
+    // arena border — electric double hairline, flares on kills
+    const borderGlow = 0.12 + pulse * 0.35;
+    ctx.strokeStyle = `rgba(0,240,255,${borderGlow.toFixed(3)})`;
+    ctx.lineWidth = 8;
     ctx.strokeRect(0, 0, WORLD_W, WORLD_H);
-    ctx.strokeStyle = 'rgba(148,178,255,0.28)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(220,250,255,0.5)';
+    ctx.lineWidth = 2;
     ctx.strokeRect(0, 0, WORLD_W, WORLD_H);
 
-    // gems — tiered colors (green/blue/gold), restrained pulse
+    // gems — tiered colors (green/blue/gold), juicy pulse + gold halo
+    // potato skips halo glows: sprite alone still reads clearly
     for (const g of this.gems) {
       const tier = gemTierFor(g.val);
-      if (tier === 2) drawGlow(ctx, '#ffd319', g.x, g.y, 22, 0.3);
-      const pulse = 1 + Math.sin(g.t * 5) * 0.12;
-      const s = 24 * pulse * (tier === 2 ? 1.3 : tier === 1 ? 1.12 : 1);
+      if (q <= 1) {
+        if (tier === 2) drawGlow(ctx, '#ffd319', g.x, g.y, 30, 0.55);
+        else if (tier === 1) drawGlow(ctx, '#7dd3fc', g.x, g.y, 20, 0.35);
+      } else if (tier === 2) {
+        drawGlow(ctx, '#ffd319', g.x, g.y, 24, 0.4);
+      }
+      const pulse = 1 + Math.sin(g.t * 6) * 0.16;
+      const s = 26 * pulse * (tier === 2 ? 1.35 : tier === 1 ? 1.15 : 1);
       const spr = gemSpriteTier(tier);
       ctx.drawImage(spr, g.x - s / 2, g.y - s / 2, s, s);
     }
 
     // powerups — calm bob, rotating dashed halo, soft glow
-    const nowMs = performance.now();
+    const nowMs = this.renderNow;
+    // potato: static halo (no lineDashOffset anim) + no per-powerup glow
     for (const p of this.powerups) {
-      const bob = Math.sin(nowMs / 420 + p.x * 0.05) * 3;
+      const bob = q >= 3 ? 0 : Math.sin(nowMs / 420 + p.x * 0.05) * 3;
       const blink = p.life < 5 ? (Math.sin(nowMs / 140) > 0 ? 1 : 0.4) : 1;
-      drawGlow(ctx, POWERUP_COLOR[p.kind], p.x, p.y + bob, 26, 0.5 * blink);
+      if (q <= 2) drawGlow(ctx, POWERUP_COLOR[p.kind], p.x, p.y + bob, 26, 0.5 * blink);
       ctx.save();
       ctx.globalAlpha = blink;
       ctx.translate(p.x, p.y + bob);
@@ -2537,19 +2892,29 @@ export class GameEngine {
       ctx.restore();
     }
 
-    // orbital blades — restrained gold
+    // orbital blades — blazing gold with motion streaks (streak only on high)
     if (this.stats.orbitals > 0 && this.deathT < 0) {
       for (let i = 0; i < this.stats.orbitals; i++) {
         const a = this.orbitalAngle + (i / this.stats.orbitals) * TAU;
         const ox = this.px + Math.cos(a) * 74;
         const oy = this.py + Math.sin(a) * 74;
-        drawGlow(ctx, '#ffd319', ox, oy, 18, 0.5);
+        if (q <= 2) drawGlow(ctx, '#ffd319', ox, oy, 26, 0.75);
         ctx.save();
         ctx.translate(ox, oy);
         ctx.rotate(a * 3);
-        ctx.fillStyle = '#e8d9a8';
+        if (q <= 1) {
+          // streak
+          ctx.fillStyle = 'rgba(255,211,25,0.25)';
+          ctx.beginPath();
+          ctx.moveTo(-14, 0);
+          ctx.lineTo(-2, 4);
+          ctx.lineTo(-2, -4);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.fillStyle = '#fff3c4';
         ctx.beginPath();
-        ctx.moveTo(10, 0);
+        ctx.moveTo(11, 0);
         ctx.lineTo(-6, 7);
         ctx.lineTo(-6, -7);
         ctx.closePath();
@@ -2558,34 +2923,38 @@ export class GameEngine {
       }
     }
 
-    // friendly bullets — slimmer streaks, calm glow
+    // friendly bullets — hot neon streaks; glow skipped on potato for non-crits
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (const b of this.bullets) {
-      const col = b.tint ?? (b.crit ? '#ffe9a8' : '#a8ecff');
-      drawGlow(ctx, col, b.x, b.y, 11, 0.55);
+      const col = b.tint ?? (b.crit ? '#ffe9a8' : '#5df2ff');
+      const skipGlow = q >= 2 && !b.crit && !b.tint;
+      if (!skipGlow) drawGlow(ctx, col, b.x, b.y, b.crit ? 18 : 14, b.crit ? 0.9 : 0.75);
       const a = Math.atan2(b.vy, b.vx);
       ctx.save();
       ctx.translate(b.x, b.y);
       ctx.rotate(a);
       ctx.fillStyle = col;
-      ctx.fillRect(-8, -1.8, 16, 3.6);
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(6, 0, b.r * 0.35, 0, TAU);
-      ctx.fill();
+      ctx.fillRect(-10, -2.2, 20, 4.4);
+      if (q <= 2) {
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(6, 0, b.r * 0.5, 0, TAU);
+        ctx.fill();
+      }
       ctx.restore();
     }
-    // enemy bullets — readable, not blinding
+    // enemy bullets — hot readable orbs; pulse frozen on potato
+    const ebPulse = q >= 3 ? 0.65 : 0.65 + Math.sin(nowMs / 180) * 0.15;
     for (const b of this.ebullets) {
-      drawGlow(ctx, '#ff5d7e', b.x, b.y, b.r + 5, 0.55);
+      if (q <= 2) drawGlow(ctx, '#ff2d78', b.x, b.y, b.r + 9, ebPulse);
       ctx.fillStyle = '#ff5d7e';
       ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r * 0.9, 0, TAU);
+      ctx.arc(b.x, b.y, b.r, 0, TAU);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r * 0.3, 0, TAU);
+      ctx.arc(b.x, b.y, b.r * 0.38, 0, TAU);
       ctx.fill();
     }
     ctx.restore();
@@ -2595,22 +2964,58 @@ export class GameEngine {
       this.drawPlayer(ctx);
     }
 
-    // particles (world space)
-    this.fx.draw(ctx);
+    // v6 voidstorm telegraph ring (world space, before particles)
+    if (this.stormWarn) {
+      const w = this.stormWarn;
+      const k = 1 - w.t / 0.8;
+      ctx.save();
+      ctx.globalAlpha = 0.5 + k * 0.4;
+      ctx.strokeStyle = '#5df2ff';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 8]);
+      ctx.lineDashOffset = -nowMs / 60;
+      ctx.beginPath();
+      ctx.arc(w.x, w.y, 30 + k * 65, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.12 + k * 0.12;
+      ctx.fillStyle = '#5df2ff';
+      ctx.beginPath();
+      ctx.arc(w.x, w.y, 95, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // particles (world space, culled to view on low quality)
+    if (q >= 2) this.fx.draw(ctx, { x: camX, y: camY }, this.viewW, this.viewH);
+    else this.fx.draw(ctx);
 
     ctx.restore();
 
-    // vignette (cached gradient)
-    if (this.vigGrad) {
+    // vignette (cached gradient — skipped on potato for fill-rate)
+    if (this.vigGrad && q <= 2) {
       ctx.fillStyle = this.vigGrad;
       ctx.fillRect(0, 0, this.viewW, this.viewH);
     }
 
-    // low hp — soft breath, not alarm
+    // low hp — urgent red breath + heartbeat pulse (static on potato)
     const hpFrac = this.hp / this.stats.maxHp;
-    if (hpFrac < 0.32 && this.deathT < 0) {
-      const a = (0.32 - hpFrac) * 1.1 + Math.sin(performance.now() / 420) * 0.03;
-      ctx.fillStyle = `rgba(255,45,90,${clamp(a, 0, 0.2).toFixed(3)})`;
+    if (hpFrac < 0.35 && this.deathT < 0) {
+      const beat = q >= 3 ? 0.5 : Math.sin(nowMs / 300) * 0.5 + 0.5;
+      const a = (0.35 - hpFrac) * 1.4 + beat * 0.06;
+      ctx.fillStyle = `rgba(255,30,80,${clamp(a, 0, 0.32).toFixed(3)})`;
+      ctx.fillRect(0, 0, this.viewW, this.viewH);
+      // danger edge glow
+      ctx.save();
+      ctx.strokeStyle = `rgba(255,45,90,${(0.35 + beat * 0.3).toFixed(3)})`;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(3, 3, this.viewW - 6, this.viewH - 6);
+      ctx.restore();
+    }
+
+    // kill-flash: white-hot frame on boss / elite takedowns (cinematic only)
+    if (this.gridPulse > 0.7 && q <= 1) {
+      ctx.fillStyle = `rgba(255,255,255,${((this.gridPulse - 0.7) * 0.25).toFixed(3)})`;
       ctx.fillRect(0, 0, this.viewW, this.viewH);
     }
 
@@ -2628,22 +3033,37 @@ export class GameEngine {
       this.drawOffscreenIndicators(ctx, camX, camY);
     }
 
-    // wave banner — editorial, quiet confidence
+    // wave banner — big cinematic slam (no shadowBlur on low: fake glow via double-draw)
     if (this.waveBannerT > 0) {
       const t = this.waveBannerT;
-      const alpha = clamp(t / 0.5, 0, 1) * clamp((2.2 - t) / 0.3 + 0.2, 0, 1);
+      const alpha = clamp(t / 0.4, 0, 1) * clamp((2.4 - t) / 0.4 + 0.2, 0, 1);
+      const slam = 1 + (t > 1.9 ? (2.4 - t) * 0.12 : 0);
       ctx.save();
-      ctx.globalAlpha = clamp(alpha, 0, 1) * 0.95;
+      ctx.globalAlpha = clamp(alpha, 0, 1);
       ctx.textAlign = 'center';
-      ctx.font = `700 ${Math.min(40, this.viewW / 15)}px Orbitron, Vazirmatn, sans-serif`;
-      ctx.lineWidth = 5;
-      ctx.strokeStyle = 'rgba(3,4,12,0.85)';
+      const fs = Math.min(54, this.viewW / 12) * slam;
+      ctx.font = `900 ${fs}px Orbitron, Vazirmatn, sans-serif`;
+      ctx.lineWidth = 7;
+      ctx.strokeStyle = 'rgba(3,4,12,0.9)';
       const label = this.wave % 5 === 0 ? `WAVE ${this.wave} — BOSS` : `WAVE ${this.wave}`;
-      ctx.strokeText(label, this.viewW / 2, 116);
-      ctx.fillStyle = this.wave % 5 === 0 ? '#f2b8c1' : '#d9f4ff';
-      ctx.shadowColor = 'rgba(0,0,0,0.6)';
-      ctx.shadowBlur = 12;
-      ctx.fillText(label, this.viewW / 2, 116);
+      const isBoss = this.wave % 5 === 0;
+      ctx.strokeText(label, this.viewW / 2, 120);
+      ctx.fillStyle = isBoss ? '#ff5d7e' : '#eafcff';
+      if (q <= 1) {
+        ctx.shadowColor = isBoss ? 'rgba(255,45,100,0.9)' : 'rgba(0,240,255,0.8)';
+        ctx.shadowBlur = 28;
+        ctx.fillText(label, this.viewW / 2, 120);
+        ctx.shadowBlur = 0;
+      } else {
+        // cheap glow: offset double-draw instead of shadowBlur (10x faster)
+        ctx.fillStyle = isBoss ? 'rgba(255,45,100,0.35)' : 'rgba(0,240,255,0.35)';
+        ctx.fillText(label, this.viewW / 2 + 2, 122);
+        ctx.fillStyle = isBoss ? '#ff5d7e' : '#eafcff';
+        ctx.fillText(label, this.viewW / 2, 120);
+      }
+      ctx.font = `700 13px Vazirmatn, sans-serif`;
+      ctx.fillStyle = isBoss ? '#ffb3c2' : 'rgba(0,240,255,0.85)';
+      ctx.fillText(isBoss ? '▲ باس وارد میدان شد ▲' : '✦ موج جدید — بجنگ ✦', this.viewW / 2, 148);
       ctx.restore();
     }
 
@@ -2669,18 +3089,25 @@ export class GameEngine {
 
   private drawPlayer(ctx: CanvasRenderingContext2D): void {
     const col = this.shipColor();
-    drawGlow(ctx, col, this.px, this.py, 30, 0.34);
+    const now = this.renderNow || performance.now();
+    const speedGlow = Math.min(0.35, Math.hypot(this.pvx, this.pvy) / 2200);
+    // potato: single glow instead of double (fill-rate)
+    if (this.quality >= 3) drawGlow(ctx, col, this.px, this.py, 36, 0.55);
+    else {
+      drawGlow(ctx, col, this.px, this.py, 44, 0.6 + speedGlow);
+      drawGlow(ctx, '#ffffff', this.px, this.py, 18, 0.25);
+    }
     ctx.save();
     ctx.translate(this.px, this.py);
     if (this.overdriveT > 0) {
       ctx.fillStyle = 'rgba(255,220,120,0.08)';
       ctx.beginPath();
-      ctx.arc(0, 0, 34 + Math.sin(performance.now() / 140) * 3, 0, TAU);
+      ctx.arc(0, 0, 34 + Math.sin(now / 140) * 3, 0, TAU);
       ctx.fill();
     }
     ctx.rotate(this.aim);
     // engine flame — shorter, softer
-    const flame = 9 + Math.sin(performance.now() / 70) * 2.5 + Math.hypot(this.pvx, this.pvy) / 90;
+    const flame = 9 + Math.sin(now / 70) * 2.5 + Math.hypot(this.pvx, this.pvy) / 90;
     ctx.fillStyle = 'rgba(255,170,80,0.28)';
     ctx.beginPath();
     ctx.moveTo(-11, 8);
@@ -2733,9 +3160,9 @@ export class GameEngine {
 
     // energy shield — thin double ring
     if (this.shieldT > 0) {
-      drawGlow(ctx, '#7deeff', this.px, this.py, 36, 0.35);
+      if (this.quality <= 2) drawGlow(ctx, '#7deeff', this.px, this.py, 36, 0.35);
       ctx.save();
-      ctx.globalAlpha = 0.5 + Math.sin(performance.now() / 160) * 0.1;
+      ctx.globalAlpha = 0.5 + Math.sin(now / 160) * 0.1;
       ctx.strokeStyle = '#a8ecff';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -2756,7 +3183,7 @@ export class GameEngine {
       ctx.strokeStyle = this.dashT > 0 ? '#ffffff' : '#a8ecff';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(this.px, this.py, 21 + Math.sin(performance.now() / 100) * 1.5, 0, TAU);
+      ctx.arc(this.px, this.py, 21 + Math.sin(now / 100) * 1.5, 0, TAU);
       ctx.stroke();
       ctx.restore();
     }
@@ -2779,16 +3206,20 @@ export class GameEngine {
       ctx.restore();
     }
     const dim = e.spawnT > 0 ? 0.45 : 1;
-    // calm glow — elites whisper gold, normals barely breathe
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    drawGlow(ctx, color, e.x, e.y, e.r + 12, (e.elite ? 0.5 : 0.32) * dim);
-    ctx.restore();
+    // punchy glow — LOD: potato keeps glow only for elite/boss/flash
+    const keepGlow = this.quality <= 1 || e.elite || e.kind === 'boss' || e.flash > 0.3;
+    if (keepGlow) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawGlow(ctx, color, e.x, e.y, e.r + 18, (e.elite ? 0.85 : e.kind === 'boss' ? 0.9 : 0.55) * dim);
+      if (e.flash > 0.3 && this.quality <= 2) drawGlow(ctx, '#ffffff', e.x, e.y, e.r + 10, e.flash * 0.7 * dim);
+      ctx.restore();
+    }
     ctx.save();
     ctx.globalAlpha = dim;
     ctx.translate(e.x, e.y);
     const face = angleTo(e.x, e.y, this.px, this.py);
-    ctx.rotate(e.kind === 'shooter' || e.kind === 'boss' || e.kind === 'sniper' || e.kind === 'lancer' ? face : face + e.t * 0.6);
+    ctx.rotate(e.kind === 'shooter' || e.kind === 'boss' || e.kind === 'sniper' || e.kind === 'lancer' || e.kind === 'stinger' ? face : face + e.t * 0.6);
     // hit squash — the hull pops on impact, then settles (flash decays 5/s)
     const squash = 1 + Math.min(0.16, e.flash * 0.16);
     ctx.scale(squash, squash);
@@ -2881,6 +3312,13 @@ export class GameEngine {
       ctx.lineTo(-e.r * 0.2, 0);
       ctx.lineTo(-e.r * 0.5, -e.r * 0.5);
       ctx.closePath();
+    } else if (e.kind === 'stinger') {
+      // v6: triple-fin dart — fast skirmisher silhouette
+      ctx.moveTo(e.r + 5, 0);
+      ctx.lineTo(-e.r * 0.4, e.r * 0.55);
+      ctx.lineTo(-e.r * 0.1, 0);
+      ctx.lineTo(-e.r * 0.4, -e.r * 0.55);
+      ctx.closePath();
     } else if (e.kind === 'hive') {
       // honeycomb carrier hex
       for (let i = 0; i < 6; i++) {
@@ -2972,6 +3410,14 @@ export class GameEngine {
       ctx.moveTo(e.r + 6, 0);
       ctx.lineTo(-e.r * 0.4, e.r * 0.42);
       ctx.stroke();
+    } else if (e.kind === 'stinger') {
+      // triple-dot burst ports that glow when telegraphing
+      ctx.fillStyle = e.state === 1 ? '#ffffff' : body;
+      ctx.beginPath();
+      ctx.arc(e.r * 0.35, -3.5, 2, 0, TAU);
+      ctx.arc(e.r * 0.35, 3.5, 2, 0, TAU);
+      ctx.arc(e.r * 0.55, 0, 2.2, 0, TAU);
+      ctx.fill();
     } else if (e.kind === 'tank') {
       ctx.strokeStyle = body;
       ctx.globalAlpha = 0.65 * dim;

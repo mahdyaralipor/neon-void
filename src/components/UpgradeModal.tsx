@@ -41,12 +41,15 @@ const ICONS: Record<string, typeof Zap> = {
   nova: Sparkles,
   seeker: Rocket,
   secondwind: HeartPulse,
+  chain: Zap,
+  headhunter: Crosshair,
+  phasedive: Wind,
 };
 
 const TIER_CARD: Record<string, string> = {
-  common: 'border-white/[0.09] hover:border-slate-300/30',
-  rare: 'border-violet-300/25 hover:border-violet-300/50',
-  epic: 'border-amber-200/30 hover:border-amber-200/60',
+  common: 'border-white/[0.09] hover:border-slate-300/40',
+  rare: 'border-violet-300/30 hover:border-violet-300/60 shadow-[0_0_24px_rgba(177,75,255,0.12)]',
+  epic: 'border-amber-200/40 hover:border-amber-200/70 shadow-[0_0_32px_rgba(255,211,25,0.18)]',
 };
 
 const TIER_DOT: Record<string, string> = {
@@ -70,14 +73,14 @@ const TIER_LABEL: Record<string, string> = {
 export default function UpgradeModal({ choices, level, taken, rerollsLeft, onPick, onReroll, onSkip }: Props) {
   const ownedCount = Object.keys(taken).length;
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-md">
+    <div className="scanlines absolute inset-0 z-30 flex items-center justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-lg">
       <div className="anim-rise my-auto w-full max-w-3xl">
         <div className="text-center">
-          <div className="chip tabular mx-auto w-fit" dir="ltr">
-            <Star size={12} className="text-amber-200/80" /> LEVEL {level}
+          <div className="chip tabular mx-auto w-fit !border-amber-200/25 !bg-amber-200/[0.08] !text-amber-100 shadow-[0_0_24px_rgba(255,211,25,0.2)]" dir="ltr">
+            <Star size={12} className="text-amber-200" fill="currentColor" /> LEVEL {level} — POWER SURGE
           </div>
-          <h2 className="mt-3 text-[22px] font-extrabold tracking-tight text-white">یک ارتقا انتخاب کن</h2>
-          <p className="mt-1 text-[12px] text-slate-500">هر انتخاب بیلدت را شکل می‌دهد — استک می‌شود</p>
+          <h2 className="neon-text mt-3 text-[26px] font-black tracking-tight text-white">یک ارتقا انتخاب کن</h2>
+          <p className="mt-1 text-[12px] text-slate-400">هر انتخاب بیلدت را شکل می‌دهد — استک می‌شود · <span className="text-cyan-300">حماسی = بازی‌عوض‌کن</span></p>
           <div className="mt-3 flex items-center justify-center gap-2.5">
             <button
               onClick={onReroll}
@@ -105,7 +108,7 @@ export default function UpgradeModal({ choices, level, taken, rerollsLeft, onPic
               <button
                 key={c.id}
                 onClick={() => onPick(c.id)}
-                className={`btn-neon card-hover group rounded-2xl border bg-gradient-to-b from-white/[0.05] to-transparent p-5 text-right ${TIER_CARD[c.tier]}`}
+                className={`btn-neon card-hover card-shine group rounded-2xl border bg-gradient-to-b from-white/[0.07] to-transparent p-5 text-right ${TIER_CARD[c.tier]} ${c.tier === 'epic' ? 'rarity-epic' : c.tier === 'rare' ? 'rarity-rare' : ''}`}
               >
                 <div className="flex items-center justify-between">
                   <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-slate-400">

@@ -7,6 +7,7 @@ const TOTALS_KEY = 'neon-void-totals-v2';
 const SETTINGS_KEY = 'neon-void-settings';
 const SHARDS_KEY = 'neon-void-shards-v1';
 const META_KEY = 'neon-void-meta-v1';
+const RUNS_KEY = 'neon-void-runs-v1';
 
 export interface BoardEntry {
   score: number;
@@ -70,6 +71,34 @@ export function pushBoard(e: BoardEntry): BoardEntry[] {
   }
 }
 
+export interface RunEntry extends BoardEntry {
+  victory: boolean;
+  endless: boolean;
+}
+
+export function getRuns(): RunEntry[] {
+  try {
+    const raw = localStorage.getItem(RUNS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as RunEntry[];
+    return Array.isArray(arr) ? arr.slice(0, 10) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function pushRun(e: RunEntry): RunEntry[] {
+  try {
+    const arr = getRuns();
+    arr.unshift(e);
+    const top = arr.slice(0, 10);
+    localStorage.setItem(RUNS_KEY, JSON.stringify(top));
+    return top;
+  } catch {
+    return [];
+  }
+}
+
 export function getTotals(): Totals {
   const fb: Totals = { runs: 0, kills: 0, time: 0, bestWave: 0 };
   try {
@@ -95,6 +124,8 @@ export function addTotals(kills: number, time: number, wave: number): Totals {
   return t;
 }
 
+export type QualityMode = 'auto' | 'high' | 'balanced' | 'performance' | 'potato';
+
 export interface SavedSettings {
   difficulty: Difficulty;
   particles: number;
@@ -104,6 +135,7 @@ export interface SavedSettings {
   musicVol: number; // 0..1
   sfxVol: number; // 0..1
   autoQuality: boolean;
+  qualityMode: QualityMode;
   showFps: boolean;
   gameSpeed: number; // 0.9 calm | 1 standard | 1.25 turbo
   showDamageNumbers: boolean;
@@ -119,6 +151,7 @@ export function getSettings(): SavedSettings {
     musicVol: 0.8,
     sfxVol: 1,
     autoQuality: true,
+    qualityMode: 'auto',
     showFps: false,
     gameSpeed: 1,
     showDamageNumbers: true,
@@ -131,6 +164,12 @@ export function getSettings(): SavedSettings {
     if (s.gameSpeed !== 0.9 && s.gameSpeed !== 1 && s.gameSpeed !== 1.25) {
       s.gameSpeed = 1;
     }
+    const validModes: QualityMode[] = ['auto', 'high', 'balanced', 'performance', 'potato'];
+    if (!validModes.includes(s.qualityMode)) {
+      // migrate legacy autoQuality flag
+      s.qualityMode = s.autoQuality ? 'auto' : 'high';
+    }
+    s.autoQuality = s.qualityMode === 'auto';
     return s;
   } catch {
     return fallback;
