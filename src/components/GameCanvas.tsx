@@ -1,17 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { GameEngine } from '../game/engine';
 import type { EngineCallbacks, EngineOptions, MetaLevels } from '../game/types';
-import type { SavedSettings } from '../game/storage';
+import type { Checkpoint, SavedSettings } from '../game/storage';
 
 interface Props {
   settings: SavedSettings;
   meta: MetaLevels;
+  checkpoint?: Checkpoint | null;
   paused: boolean;
   callbacks: EngineCallbacks;
   onEngine: (e: GameEngine | null) => void;
 }
 
-export default function GameCanvas({ settings, meta, paused, callbacks, onEngine }: Props) {
+export default function GameCanvas({ settings, meta, checkpoint, paused, callbacks, onEngine }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const cbRef = useRef(callbacks);
@@ -27,6 +28,7 @@ export default function GameCanvas({ settings, meta, paused, callbacks, onEngine
       onGameOver: (r) => cbRef.current.onGameOver(r),
       onWave: (w) => cbRef.current.onWave(w),
       onPauseKey: () => cbRef.current.onPauseKey(),
+      onQualityChange: (q) => cbRef.current.onQualityChange?.(q),
     };
     const opts: EngineOptions = {
       difficulty: settings.difficulty,
@@ -39,6 +41,7 @@ export default function GameCanvas({ settings, meta, paused, callbacks, onEngine
       meta,
       speed: settings.gameSpeed,
       showDamageNumbers: settings.showDamageNumbers,
+      checkpoint: checkpoint ?? null,
     };
     const engine = new GameEngine(canvas, stable, opts);
     engineRef.current = engine;

@@ -38,6 +38,9 @@ export default function PauseMenu({ muted, hud, taken, onResume, onRestart, onMe
             </div>
           </div>
         )}
+        {hud && (hud.mods.nova > 0 || hud.mods.chain > 0 || hud.orbitals > 0) && (
+          <p className="mt-1.5 text-[10px] text-slate-600">بدون احتساب نووا / زنجیره / تیغه — DPS واقعی بیشتر است</p>
+        )}
         {buildIds.length > 0 && (
           <div className="mt-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3 text-right">
             <div className="mb-2 text-[11px] font-extrabold text-slate-300">بیلد فعلی</div>

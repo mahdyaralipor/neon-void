@@ -26,7 +26,8 @@ import {
   applyUpgrade, rollUpgrades, executionerMult, comboScoreMult, comboWindow, thornsDamage,
 } from './upgrades';
 import { angleTo, clamp, dist2, rand, sweep, TAU } from './utils';
-import { saveBest, pushBoard, addTotals, addShards, pushRun } from './storage';
+import { saveBest, pushBoard, addTotals, addShards, pushRun, saveCheckpoint, clearCheckpoint } from './storage';
+import type { Checkpoint } from './storage';
 import { unlockAchievement, achievementDef } from './achievements';
 
 export const WORLD_W = 2600;
@@ -271,6 +272,7 @@ export class GameEngine {
   private baseParticleScale = 1;
   private qualityMode: 'auto' | 'high' | 'balanced' | 'performance' | 'potato' = 'auto';
   private renderNow = 0;
+  private prevQualityApplied = 0;
 
   // v2.1 features: wave mutator + boss/achievement tracking
   private mutator: MutatorKind | null = null;
@@ -307,6 +309,9 @@ export class GameEngine {
   private frameCount = 0;
   private reducedMotion = false;
   private stingerKills = 0;
+  // totals bookkeeping so victory + endless death don't double-count one run
+  private accountedKills = 0;
+  private accountedTime = 0;
 
   // cached background gradients (rebuilt on resize)
   private bgGrad: CanvasGradient | null = null;
@@ -327,6 +332,7 @@ export class GameEngine {
     this.audio.muted = opts.muted;
     this.qualityMode = opts.qualityMode ?? (opts.autoQuality ? 'auto' : 'high');
     this.quality = this.initialQuality();
+    this.prevQualityApplied = this.quality;
     this.fx.setQuality(this.quality);
     this.fx.scale = this.baseParticleScale * this.qualityParticleMult();
     try {
@@ -427,6 +433,11 @@ export class GameEngine {
 
   private onBlur = (): void => {
     this.clearInputs();
+    // alt-tab / window switch would otherwise kill the run silently —
+    // request a pause (App no-ops it during upgrade/gameover overlays).
+    if (!this.destroyed && !this.paused && !this.upgradeLock && this.deathT < 0 && this.victoryT < 0) {
+      this.cb.onPauseKey();
+    }
   };
 
   /** prevent stuck movement keys / sticks when tab loses focus */
@@ -587,6 +598,31 @@ export class GameEngine {
     this.paused = false;
     this.upgradeLock = false;
     this.aim = -Math.PI / 2;
+    this.accountedKills = 0;
+    this.accountedTime = 0;
+    // checkpoint resume: rebuild the wave-5/10/15 build on a fresh arena
+    const cp: Checkpoint | null | undefined = this.opts.checkpoint;
+    if (cp && cp.wave >= 5) {
+      this.wave = cp.wave;
+      this.waveKills = 0;
+      this.waveQuota = this.quotaFor(cp.wave);
+      this.score = cp.score;
+      this.kills = cp.kills;
+      this.elites = cp.elites;
+      this.level = cp.level;
+      this.xp = 0;
+      this.xpNext = cp.xpNext;
+      this.time = cp.time;
+      this.shards = cp.shards;
+      for (const [id, n] of Object.entries(cp.taken)) {
+        for (let i = 0; i < n; i++) applyUpgrade(this.stats, id);
+        this.taken.set(id, n);
+      }
+      this.hp = this.stats.maxHp;
+      this.intermission = 2.5;
+      this.waveBannerT = 2.2;
+      this.setAnnounce(`⟳ ادامه از موج ${cp.wave} — بیلدت برگشت!`, 2.6, 2);
+    }
   }
 
   private quotaFor(w: number): number {
@@ -904,9 +940,19 @@ export class GameEngine {
   private applyQuality(): void {
     // particle scale steps: 1x / 0.7x / 0.45x / 0.28x of the user's base setting
     // juice survives because core flashes + shockwaves are kept, only satellites shrink
+    const dropped = this.quality > this.prevQualityApplied;
+    this.prevQualityApplied = this.quality;
     this.fx.scale = this.baseParticleScale * this.qualityParticleMult();
     this.fx.setQuality(this.quality);
     this.resize(); // re-applies DPR cap + gradient cache
+    // tell the UI so it can toast "lite mode on" instead of silently degrading
+    if (dropped && this.qualityMode === 'auto') {
+      try {
+        this.cb.onQualityChange?.(this.quality);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   // ---------- loop ----------
@@ -1056,6 +1102,7 @@ export class GameEngine {
       fps: Math.round(this.fpsEMA),
       quality: this.quality,
       mutator: this.mutator,
+      endless: this.endless,
     };
     this.cb.onHud(snap);
   }
@@ -1211,8 +1258,15 @@ export class GameEngine {
       score, wave: this.wave, kills: this.kills,
       time: Math.floor(this.time), ship: this.opts.ship, date: Date.now(),
     });
-    addTotals(this.kills, this.time, this.wave);
-    if (victory) this.shards += 10;
+    // endless continues after a victory screen — only count the delta,
+    // otherwise one run lands in the totals twice.
+    addTotals(this.kills - this.accountedKills, this.time - this.accountedTime, this.wave);
+    this.accountedKills = this.kills;
+    this.accountedTime = this.time;
+    if (victory) {
+      this.shards += 10;
+      clearCheckpoint();
+    }
     if (this.endless) this.shards += 5;
     addShards(this.shards);
     try {
@@ -1477,6 +1531,17 @@ export class GameEngine {
         this.endlessAnn = true;
       }
       if (this.mutator === 'voidstorm') this.grantAchievement('stormrider');
+      // checkpoint every 5 cleared waves (pre-victory): crash insurance + comeback
+      if (this.wave % 5 === 0 && this.wave < WIN_WAVE) {
+        const taken: Record<string, number> = {};
+        for (const [k, v] of this.taken) taken[k] = v;
+        saveCheckpoint({
+          v: 1, ship: this.opts.ship, difficulty: this.opts.difficulty,
+          wave: this.wave, score: Math.floor(this.score), kills: this.kills,
+          elites: this.elites, level: this.level, xpNext: this.xpNext,
+          taken, time: Math.floor(this.time), shards: this.shards, date: Date.now(),
+        });
+      }
       const endlessTag = this.endless ? ' ♾️×۱.۵' : '';
       this.setAnnounce(`موج ${this.wave} پاکسازی شد! +${100 * this.wave}${endlessTag}`, 2, 1);
       if (!this.endless && this.wave === WIN_WAVE - 1) {

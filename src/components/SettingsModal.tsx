@@ -1,5 +1,5 @@
-import { X } from 'lucide-react';
-import type { SavedSettings } from '../game/storage';
+import { RotateCcw, X } from 'lucide-react';
+import { DEFAULT_SETTINGS, type SavedSettings } from '../game/storage';
 
 interface Props {
   settings: SavedSettings;
@@ -170,6 +170,12 @@ export default function SettingsModal({ settings, onChange, onClose }: Props) {
           className="btn-neon btn-primary mt-5 w-full rounded-2xl px-5 py-3 text-sm font-black"
         >
           تأیید
+        </button>
+        <button
+          onClick={() => onChange({ ...DEFAULT_SETTINGS, ship: settings.ship })}
+          className="btn-neon mx-auto mt-2 inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-[11px] font-bold text-slate-500 transition hover:text-slate-300"
+        >
+          <RotateCcw size={12} /> بازنشانی به پیش‌فرض (کشتی حفظ می‌شود)
         </button>
       </div>
     </div>

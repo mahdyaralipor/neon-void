@@ -11,8 +11,8 @@ import type { GameEngine } from './game/engine';
 import type { GameResult, HudSnapshot, UpgradeDef, ShipId, MetaLevels } from './game/types';
 import {
   getBest, getBoard, getSettings, getTotals, saveSettings,
-  getMeta, getShards, buyMeta,
-  type BoardEntry, type SavedSettings, type Totals,
+  getMeta, getShards, buyMeta, getCheckpoint,
+  type BoardEntry, type Checkpoint, type SavedSettings, type Totals,
 } from './game/storage';
 
 type Screen = 'menu' | 'game';
@@ -35,6 +35,9 @@ export default function App() {
   const [runId, setRunId] = useState(0);
   const [takenStacks, setTakenStacks] = useState<Record<string, number>>({});
   const [rerollsLeft, setRerollsLeft] = useState(1);
+  const [checkpoint, setCheckpoint] = useState<Checkpoint | null>(null);
+  const [pendingCheckpoint, setPendingCheckpoint] = useState<Checkpoint | null>(null);
+  const [qualityToast, setQualityToast] = useState<{ q: number; key: number } | null>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const phaseRef = useRef(phase);
   useEffect(() => {
@@ -65,6 +68,9 @@ export default function App() {
     setChoices([]);
     setTakenStacks({});
     setRerollsLeft(1);
+    setCheckpoint(null);
+    setPendingCheckpoint(null);
+    setQualityToast(null);
     setPhase('playing');
     setScreen('game');
     setRunId((v) => v + 1);
@@ -95,6 +101,31 @@ export default function App() {
     setPhase('playing');
   }, []);
 
+  const continueFromCheckpoint = useCallback(() => {
+    const cp = getCheckpoint();
+    if (!cp) return;
+    setPendingCheckpoint(cp);
+    setCheckpoint(null);
+    setResult(null);
+    setHud(null);
+    setChoices([]);
+    setTakenStacks({});
+    setRerollsLeft(1);
+    setPhase('playing');
+    setRunId((v) => v + 1);
+  }, []);
+
+  const onQualityChange = useCallback((q: number) => {
+    setQualityToast({ q, key: Date.now() });
+  }, []);
+
+  // auto-dismiss the quality toast
+  useEffect(() => {
+    if (!qualityToast) return;
+    const t = setTimeout(() => setQualityToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [qualityToast]);
+
   // engine callbacks (stable wrapper via ref in GameCanvas, so plain callbacks fine)
   const onHud = useCallback((h: HudSnapshot) => setHud(h), []);
   const onLevelUp = useCallback((c: UpgradeDef[]) => {
@@ -116,6 +147,7 @@ export default function App() {
     setBoard(getBoard());
     setTotals(getTotals());
     setShards(getShards());
+    setCheckpoint(getCheckpoint());
     setPhase('gameover');
   }, []);
   const onWave = useCallback(() => {
@@ -180,7 +212,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', fn);
   }, [phase, choices, pickUpgrade, skipUpgrade]);
 
-  const pausedForEngine = phase === 'paused' || phase === 'upgrade';
+  const pausedForEngine = phase === 'paused' || phase === 'upgrade' || (screen === 'game' && showSettings);
 
   // sync build snapshot whenever the player opens pause (cheap, on-demand)
   useEffect(() => {
@@ -237,8 +269,9 @@ export default function App() {
             key={runId}
             settings={settings}
             meta={meta}
+            checkpoint={pendingCheckpoint}
             paused={pausedForEngine}
-            callbacks={{ onHud, onLevelUp, onGameOver, onWave, onPauseKey }}
+            callbacks={{ onHud, onLevelUp, onGameOver, onWave, onPauseKey, onQualityChange }}
             onEngine={(e) => {
               engineRef.current = e;
             }}
@@ -253,6 +286,7 @@ export default function App() {
               onPause={() => setPhase('paused')}
               onMute={() => updateSettings({ ...settings, muted: !settings.muted })}
               onDash={() => engineRef.current?.tryDash()}
+              onOpenSettings={() => setShowSettings(true)}
             />
           )}
 
@@ -299,7 +333,30 @@ export default function App() {
           )}
 
           {phase === 'gameover' && result && (
-            <GameOver result={result} best={best} board={board} onRetry={startGame} onMenu={goMenu} onEndless={result.victory && !result.endless ? continueEndless : undefined} />
+            <GameOver
+              result={result}
+              best={best}
+              board={board}
+              onRetry={startGame}
+              onMenu={goMenu}
+              onEndless={result.victory && !result.endless ? continueEndless : undefined}
+              checkpointWave={
+                !result.victory && checkpoint && checkpoint.wave >= 5 &&
+                checkpoint.wave < result.wave && checkpoint.ship === settings.ship
+                  ? checkpoint.wave
+                  : null
+              }
+              onCheckpoint={continueFromCheckpoint}
+            />
+          )}
+
+          {/* auto-quality toast — the game tells you instead of silently degrading */}
+          {qualityToast && phase === 'playing' && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-20 z-20 flex justify-center px-4">
+              <div key={qualityToast.key} className="anim-announce chip !border-amber-200/25 !bg-black/70 !text-[12px] !text-amber-100 backdrop-blur-md">
+                ⚡ {qualityToast.q >= 3 ? 'حالت سبک فعال شد — روان ولی کم‌افکت‌تر' : qualityToast.q === 2 ? 'حالت عملکرد فعال شد — تعادل سرعت و کیفیت' : 'کیفیت متعادل فعال شد'}
+              </div>
+            </div>
           )}
 
           {showSettings && screen === 'game' && (

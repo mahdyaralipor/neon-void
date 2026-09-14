@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Home, RotateCcw, Trophy, Share2, Check, Infinity as InfinityIcon } from 'lucide-react';
+import { Home, RotateCcw, Trophy, Share2, Check, Infinity as InfinityIcon, History } from 'lucide-react';
 import type { GameResult, Grade } from '../game/types';
 import type { BoardEntry } from '../game/storage';
 import { formatScore, formatTime } from '../game/utils';
@@ -12,6 +12,8 @@ interface Props {
   onRetry: () => void;
   onMenu: () => void;
   onEndless?: () => void;
+  checkpointWave?: number | null;
+  onCheckpoint?: () => void;
 }
 
 const GRADE_TILE: Record<Grade, string> = {
@@ -30,14 +32,15 @@ const GRADE_FA: Record<Grade, string> = {
   D: 'دفعه بعد بهتر',
 };
 
-export default function GameOver({ result, best, board, onRetry, onMenu, onEndless }: Props) {
+export default function GameOver({ result, best, board, onRetry, onMenu, onEndless, checkpointWave, onCheckpoint }: Props) {
   const victory = result.victory;
   const canEndless = victory && !result.endless && onEndless;
   const [copied, setCopied] = useState(false);
   const share = async () => {
+    const url = 'https://mahdyaralipor.github.io/neon-void/';
     const txt = victory
-      ? `NEON VOID 🏆 پیروزی در موج ۲۰ — ${formatScore(result.score)} امتیاز · ${result.kills} کیل · ${formatTime(result.time)}`
-      : `NEON VOID — ${formatScore(result.score)} امتیاز · موج ${result.wave} · ${result.kills} کیل · گرید ${result.grade} · ${formatTime(result.time)}`;
+      ? `NEON VOID 🏆 پیروزی در موج ۲۰ — ${formatScore(result.score)} امتیاز · ${result.kills} کیل · ${formatTime(result.time)}\n${url}`
+      : `NEON VOID${result.endless ? ' ♾️' : ''} — ${formatScore(result.score)} امتیاز · موج ${result.wave} · ${result.kills} کیل · گرید ${result.grade} · ${formatTime(result.time)}\n${url}`;
     try {
       await navigator.clipboard.writeText(txt);
       setCopied(true);
@@ -145,6 +148,14 @@ export default function GameOver({ result, best, board, onRetry, onMenu, onEndle
               className="btn-neon btn-primary btn-hero-pulse inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-[15px] font-black"
             >
               <InfinityIcon size={18} /> ادامه بی‌پایان ♾️ ×۱.۵ امتیاز
+            </button>
+          )}
+          {checkpointWave && onCheckpoint && (
+            <button
+              onClick={onCheckpoint}
+              className="btn-neon btn-ghost inline-flex w-full items-center justify-center gap-2 rounded-2xl border-cyan-200/25 px-5 py-3 text-sm font-black text-cyan-100"
+            >
+              <History size={16} /> ادامه از موج {checkpointWave} — بیلدت محفوظه
             </button>
           )}
           <div className="flex gap-2">

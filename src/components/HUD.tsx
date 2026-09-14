@@ -1,5 +1,5 @@
 import {
-  Heart, Pause, Star, Timer, Volume2, VolumeX, Wind, Zap,
+  Heart, Pause, Star, Timer, Volume2, VolumeX, Wind, Zap, Settings,
   Shield, Magnet, Flame, Crown, Gauge, Sparkles, Snowflake,
   Rocket, HeartPulse,
 } from 'lucide-react';
@@ -15,6 +15,7 @@ interface Props {
   onPause: () => void;
   onMute: () => void;
   onDash: () => void;
+  onOpenSettings: () => void;
 }
 
 const POWERUP_META: Record<PowerUpKind, { fa: string; dot: string }> = {
@@ -35,7 +36,7 @@ const POWERUP_ICON: Record<PowerUpKind, typeof Shield> = {
   frost: Snowflake,
 };
 
-export default function HUD({ hud, muted, showFps, gameSpeed, onPause, onMute, onDash }: Props) {
+export default function HUD({ hud, muted, showFps, gameSpeed, onPause, onMute, onDash, onOpenSettings }: Props) {
   const hpFrac = Math.max(0, hud.hp / Math.max(1, hud.maxHp));
   const xpFrac = Math.min(1, hud.xp / Math.max(1, hud.xpNext));
   const dashFrac = 1 - hud.dashCd / Math.max(0.01, hud.dashMax);
@@ -192,7 +193,7 @@ export default function HUD({ hud, muted, showFps, gameSpeed, onPause, onMute, o
             </div>
             <div className="h-7 w-px bg-white/[0.08]" />
             <div>
-              <div className="font-display text-[15px] font-bold text-slate-100">W{hud.wave}</div>
+              <div className="font-display text-[15px] font-bold text-slate-100">W{hud.wave}{hud.endless && <span className="text-violet-300"> ∞</span>}</div>
               <div className="eyebrow !text-[9px]">{hud.kills} KILLS</div>
             </div>
             <div className="h-7 w-px bg-white/[0.08]" />
@@ -246,6 +247,13 @@ export default function HUD({ hud, muted, showFps, gameSpeed, onPause, onMute, o
               <Pause size={16} />
             </button>
             <button
+              onClick={onOpenSettings}
+              className="glass rounded-xl p-2.5 text-slate-400 transition hover:text-white"
+              aria-label="settings"
+            >
+              <Settings size={16} />
+            </button>
+            <button
               onClick={onDash}
               className="btn-neon btn-primary rounded-xl px-4 py-2.5 text-xs font-black sm:hidden"
             >
@@ -261,7 +269,7 @@ export default function HUD({ hud, muted, showFps, gameSpeed, onPause, onMute, o
       <div className="tabular mx-3 -mt-1 flex items-center justify-center gap-2.5 text-[11px] text-slate-400 sm:hidden" dir="ltr">
         <span className="font-bold text-white">{formatScore(hud.score)}</span>
         <span className="text-slate-700">·</span>
-        <span>W{hud.wave}</span>
+        <span>W{hud.wave}{hud.endless ? '∞' : ''}</span>
         <span className="text-slate-700">·</span>
         <span>{formatTime(hud.time)}</span>
         {hud.combo >= 5 && <span className="font-bold text-slate-200">×{hud.combo}</span>}

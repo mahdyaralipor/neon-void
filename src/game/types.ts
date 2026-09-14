@@ -194,6 +194,8 @@ export interface EngineOptions {
   speed: number;
   /** show floating damage numbers (off = only crits/big hits) */
   showDamageNumbers?: boolean;
+  /** mid-run checkpoint to resume from (wave 5/10/15 builds) */
+  checkpoint?: import('./storage').Checkpoint | null;
 }
 
 export interface MinimapDot {
@@ -251,8 +253,9 @@ export interface HudSnapshot {
   mods: WeaponMods;
   dots: MinimapDot[];
   fps: number;
-  quality: number; // 0 high, 1 medium, 2 low (auto-quality level)
+  quality: number; // 0 cinematic, 1 balanced, 2 performance, 3 potato
   mutator: MutatorKind | null;
+  endless: boolean;
 }
 
 export type Grade = 'S' | 'A' | 'B' | 'C' | 'D';
@@ -282,4 +285,6 @@ export interface EngineCallbacks {
   onGameOver: (r: GameResult) => void;
   onWave: (wave: number) => void;
   onPauseKey: () => void;
+  /** fired when auto-quality steps DOWN a level (not on manual changes) */
+  onQualityChange?: (quality: number) => void;
 }
