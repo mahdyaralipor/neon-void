@@ -106,6 +106,7 @@ export interface SavedSettings {
   autoQuality: boolean;
   showFps: boolean;
   gameSpeed: number; // 0.9 calm | 1 standard | 1.25 turbo
+  showDamageNumbers: boolean;
 }
 
 export function getSettings(): SavedSettings {
@@ -120,6 +121,7 @@ export function getSettings(): SavedSettings {
     autoQuality: true,
     showFps: false,
     gameSpeed: 1,
+    showDamageNumbers: true,
   };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);

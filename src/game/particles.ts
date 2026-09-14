@@ -70,7 +70,7 @@ export class ParticleSystem {
     for (let i = 0; i < 26; i++) {
       this.waves.push({ alive: false, x: 0, y: 0, r: 0, maxR: 100, life: 0, maxLife: 1, color: '#fff', width: 3 });
     }
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < 96; i++) {
       this.texts.push({ alive: false, x: 0, y: 0, life: 0, maxLife: 1, text: '', color: '#fff', size: 14 });
     }
     for (let i = 0; i < 140; i++) {
@@ -217,13 +217,16 @@ export class ParticleSystem {
     ctx.save();
     const wSpan = vw + 100;
     const hSpan = vh + 100;
+    const t = performance.now() / 1000;
     for (const s of this.stars) {
       const drift = 0.25 + s.z * 0.35;
       const x = (((s.x - cam.x * drift) % wSpan) + wSpan) % wSpan - 50;
       const y = (((s.y - cam.y * drift) % hSpan) + hSpan) % hSpan - 50;
-      ctx.globalAlpha = 0.25 + s.z * 0.55;
-      ctx.fillStyle = s.z > 0.75 ? '#9df3ff' : '#ffffff';
-      const sz = s.z * 2.1;
+      // gentle twinkle — tasteful, not arcade blink
+      const tw = 0.75 + 0.25 * Math.sin(t * (0.6 + s.z) + s.x * 0.05);
+      ctx.globalAlpha = (0.16 + s.z * 0.4) * tw;
+      ctx.fillStyle = s.z > 0.8 ? '#c8ecff' : '#e8ecf5';
+      const sz = 0.8 + s.z * 1.3;
       ctx.fillRect(x, y, sz, sz);
     }
     ctx.restore();
@@ -271,10 +274,10 @@ export class ParticleSystem {
     for (const t of this.texts) {
       if (!t.alive) continue;
       const a = Math.min(1, (t.life / t.maxLife) * 2);
-      ctx.globalAlpha = a;
-      ctx.font = `700 ${t.size}px Orbitron, Vazirmatn, sans-serif`;
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      ctx.globalAlpha = a * 0.92;
+      ctx.font = `600 ${t.size}px Orbitron, Vazirmatn, sans-serif`;
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(3,4,12,0.65)';
       ctx.strokeText(t.text, t.x, t.y);
       ctx.fillStyle = t.color;
       ctx.fillText(t.text, t.x, t.y);

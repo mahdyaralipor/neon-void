@@ -18,12 +18,12 @@ export const UPGRADE_POOL: UpgradeDef[] = [
   },
   {
     id: 'pierce', nameFa: 'گلوله نافذ', nameEn: 'Piercing Core',
-    descFa: 'گلوله‌ها +۱ دشمن را سوراخ می‌کنند', descEn: '+1 pierce',
+    descFa: 'گلوله‌ها +۱ دشمن را سوراخ می‌کنند (+۴٪ دمیج)', descEn: '+1 pierce',
     tier: 'rare', maxStacks: 4, icon: 'arrow',
   },
   {
     id: 'velocity', nameFa: 'شتاب‌دهنده ریلی', nameEn: 'Rail Accelerator',
-    descFa: '+۲۰٪ سرعت گلوله', descEn: '+20% bullet speed',
+    descFa: '+۲۰٪ سرعت گلوله +۴٪ دمیج', descEn: '+20% bullet speed',
     tier: 'common', maxStacks: 5, icon: 'wind',
   },
   {
@@ -33,7 +33,7 @@ export const UPGRADE_POOL: UpgradeDef[] = [
   },
   {
     id: 'speed', nameFa: 'پیشران یونی', nameEn: 'Ion Thrusters',
-    descFa: '+۱۲٪ سرعت حرکت', descEn: '+12% move speed',
+    descFa: '+۱۲٪ سرعت حرکت +۸٪ مگنت', descEn: '+12% move speed',
     tier: 'common', maxStacks: 6, icon: 'gauge',
   },
   {
@@ -43,17 +43,17 @@ export const UPGRADE_POOL: UpgradeDef[] = [
   },
   {
     id: 'regen', nameFa: 'نانوبات‌های ترمیم', nameEn: 'Nanobots',
-    descFa: '+۱.۶ جان در ثانیه', descEn: '+1.6 HP/s regen',
+    descFa: '+۱.۶ جان در ثانیه +۵ جان', descEn: '+1.6 HP/s regen',
     tier: 'rare', maxStacks: 6, icon: 'pulse',
   },
   {
     id: 'magnet', nameFa: 'آهنربای کوانتومی', nameEn: 'Quantum Magnet',
-    descFa: '+۴۵٪ شعاع جذب جم‌ها', descEn: '+45% pickup radius',
+    descFa: '+۴۵٪ شعاع جذب +۵٪ تجربه', descEn: '+45% pickup radius',
     tier: 'common', maxStacks: 5, icon: 'magnet',
   },
   {
     id: 'armor', nameFa: 'سپر بازتابی', nameEn: 'Aegis Shield',
-    descFa: '-۲ دمیج ورودی (حداقل ۱)', descEn: '-2 incoming damage',
+    descFa: '-۲ دمیج ورودی +۵ جان (حداقل ۱)', descEn: '-2 incoming damage',
     tier: 'rare', maxStacks: 5, icon: 'shield',
   },
   {
@@ -63,7 +63,7 @@ export const UPGRADE_POOL: UpgradeDef[] = [
   },
   {
     id: 'xp', nameFa: 'پردازنده تجربه', nameEn: 'XP Processor',
-    descFa: '+۲۵٪ جم تجربه', descEn: '+25% XP gain',
+    descFa: '+۲۵٪ جم تجربه +۳٪ دمیج', descEn: '+25% XP gain',
     tier: 'common', maxStacks: 5, icon: 'star',
   },
   {
@@ -133,16 +133,16 @@ export function applyUpgrade(stats: PlayerStats, id: string): void {
       stats.multishot = Math.min(5, stats.multishot + 1);
       stats.damage *= 0.92;
       break;
-    case 'pierce': stats.pierce += 1; break;
-    case 'velocity': stats.bulletSpeed *= 1.2; break;
+    case 'pierce': stats.pierce += 1; stats.damage *= 1.04; break;
+    case 'velocity': stats.bulletSpeed *= 1.2; stats.damage *= 1.04; break;
     case 'crit': stats.critChance = Math.min(0.75, stats.critChance + 0.12); break;
-    case 'speed': stats.moveSpeed *= 1.12; break;
+    case 'speed': stats.moveSpeed *= 1.12; stats.magnet *= 1.08; break;
     case 'maxhp': stats.maxHp += 25; break;
-    case 'regen': stats.regen += 1.6; break;
-    case 'magnet': stats.magnet *= 1.45; break;
-    case 'armor': stats.armor += 2; break;
+    case 'regen': stats.regen += 1.6; stats.maxHp += 5; break;
+    case 'magnet': stats.magnet *= 1.45; stats.xpGainMult *= 1.05; break;
+    case 'armor': stats.armor += 2; stats.maxHp += 5; break;
     case 'dash': stats.dashCooldownMax = Math.max(0.7, stats.dashCooldownMax * 0.78); break;
-    case 'xp': stats.xpGainMult *= 1.25; break;
+    case 'xp': stats.xpGainMult *= 1.25; stats.damage *= 1.03; break;
     case 'lifesteal': stats.lifesteal += 1.5; break;
     case 'overdrive':
       stats.damage *= 1.12;
@@ -162,6 +162,10 @@ export function applyUpgrade(stats: PlayerStats, id: string): void {
     case 'thorns': stats.armor += 1; break;
   }
 }
+
+export const UPGRADE_MAP: Record<string, UpgradeDef> = Object.fromEntries(
+  UPGRADE_POOL.map((u) => [u.id, u]),
+);
 
 /** dynamic executioner multiplier — read from taken stacks */
 export function executionerMult(taken: Map<string, number>): number {

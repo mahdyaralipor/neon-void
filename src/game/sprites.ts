@@ -50,10 +50,9 @@ export function clearSpriteCache(): void {
 }
 
 let gemSpr: HTMLCanvasElement | null = null;
+const gemTierSpr: (HTMLCanvasElement | null)[] = [null, null, null];
 
-/** Baked XP-gem sprite (diamond + glow) — drawn with a single drawImage, no save/rotate. */
-export function gemSprite(): HTMLCanvasElement {
-  if (gemSpr) return gemSpr;
+function bakeGem(glow: string, light: string, mid: string): HTMLCanvasElement {
   const S = 32;
   const c = document.createElement('canvas');
   c.width = S;
@@ -61,20 +60,46 @@ export function gemSprite(): HTMLCanvasElement {
   const ctx = c.getContext('2d');
   if (ctx) {
     const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-    g.addColorStop(0, 'rgba(163,255,18,0.9)');
-    g.addColorStop(0.5, 'rgba(163,255,18,0.35)');
-    g.addColorStop(1, 'rgba(163,255,18,0)');
+    g.addColorStop(0, glow);
+    g.addColorStop(0.5, glow.replace(/[\d.]+\)$/, '0.35)'));
+    g.addColorStop(1, glow.replace(/[\d.]+\)$/, '0)'));
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, S, S);
     ctx.save();
     ctx.translate(S / 2, S / 2);
     ctx.rotate(Math.PI / 4);
-    ctx.fillStyle = '#c8ff4d';
+    ctx.fillStyle = light;
     ctx.fillRect(-3.4, -3.4, 6.8, 6.8);
-    ctx.fillStyle = '#a3ff12';
+    ctx.fillStyle = mid;
     ctx.fillRect(-2.4, -2.4, 4.8, 4.8);
     ctx.restore();
   }
-  gemSpr = c;
   return c;
+}
+
+/** Baked XP-gem sprite (diamond + glow) — drawn with a single drawImage, no save/rotate. */
+export function gemSprite(): HTMLCanvasElement {
+  if (gemSpr) return gemSpr;
+  gemSpr = bakeGem('rgba(163,255,18,0.9)', '#c8ff4d', '#a3ff12');
+  return gemSpr;
+}
+
+/** Tiered gems by value: 0 small green, 1 blue, 2 gold. Cached, zero per-frame cost. */
+export function gemSpriteTier(tier: number): HTMLCanvasElement {
+  const t = tier <= 0 ? 0 : tier === 1 ? 1 : 2;
+  const hit = gemTierSpr[t];
+  if (hit) return hit;
+  const spr =
+    t === 0
+      ? bakeGem('rgba(163,255,18,0.9)', '#c8ff4d', '#a3ff12')
+      : t === 1
+        ? bakeGem('rgba(125,211,252,0.9)', '#d9f4ff', '#7dd3fc')
+        : bakeGem('rgba(255,211,25,0.9)', '#fff3c4', '#ffd319');
+  gemTierSpr[t] = spr;
+  return spr;
+}
+
+/** 0/1/2 tier from gem value — keeps the field readable at a glance. */
+export function gemTierFor(val: number): number {
+  return val >= 20 ? 2 : val >= 10 ? 1 : 0;
 }

@@ -37,6 +37,7 @@ export default function GameCanvas({ settings, meta, paused, callbacks, onEngine
       autoQuality: settings.autoQuality,
       meta,
       speed: settings.gameSpeed,
+      showDamageNumbers: settings.showDamageNumbers,
     };
     const engine = new GameEngine(canvas, stable, opts);
     engineRef.current = engine;
@@ -76,7 +77,8 @@ export default function GameCanvas({ settings, meta, paused, callbacks, onEngine
     e.setVolumes(settings.musicVol, settings.sfxVol);
     e.setAutoQuality(settings.autoQuality);
     e.setGameSpeed(settings.gameSpeed);
-  }, [settings.muted, settings.particles, settings.shake, settings.musicVol, settings.sfxVol, settings.autoQuality, settings.gameSpeed]);
+    e.setShowDamageNumbers(settings.showDamageNumbers);
+  }, [settings.muted, settings.particles, settings.shake, settings.musicVol, settings.sfxVol, settings.autoQuality, settings.gameSpeed, settings.showDamageNumbers]);
 
   return (
     <div className="absolute inset-0">

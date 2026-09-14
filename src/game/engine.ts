@@ -21,7 +21,7 @@ import type {
 import { statsForShip, MUTATORS } from './types';
 import { SynthAudio } from './audio';
 import { ParticleSystem } from './particles';
-import { drawGlow, gemSprite } from './sprites';
+import { drawGlow, gemSpriteTier, gemTierFor } from './sprites';
 import {
   applyUpgrade, rollUpgrades, executionerMult, comboScoreMult, comboWindow, thornsDamage,
 } from './upgrades';
@@ -31,6 +31,7 @@ import { unlockAchievement, achievementDef } from './achievements';
 
 export const WORLD_W = 2600;
 export const WORLD_H = 2000;
+export const WIN_WAVE = 20;
 
 interface Enemy {
   id: number;
@@ -51,7 +52,7 @@ interface Enemy {
   strafe: number;
   kx: number; ky: number;
   elite: boolean;
-  affix: 'none' | 'volatile' | 'swift';
+  affix: 'none' | 'volatile' | 'swift' | 'bulwark' | 'echo';
   orbHitCd: number;
   spiralT: number; // boss spiral pattern timer
   spiralA: number; // boss spiral angle accumulator
@@ -134,6 +135,20 @@ const POWERUP_FA: Record<PowerUpKind, string> = {
   overdrive: 'اور‌درایو!',
   heal: '+۴۰ جان!',
   frost: '❄ یخبندان!',
+};
+
+const ENEMY_FA: Record<EnemyKind, string> = {
+  chaser: 'تعقیب‌کننده',
+  weaver: 'بافنده',
+  dasher: 'جهنده',
+  shooter: 'تیرانداز',
+  splitter: 'تقسیم‌شونده',
+  mini: 'مینی',
+  sniper: 'اسنایپر',
+  tank: 'تانک',
+  lancer: 'نیزه‌دار',
+  hive: 'کندو',
+  boss: 'باس',
 };
 
 export class GameEngine {
@@ -253,6 +268,17 @@ export class GameEngine {
   private recoil = 0;
   private bossSpiralAnn = false;
   private bossEnrageAnn = false;
+  // v3.2 juice & pacing
+  private pityT = 0; // time since last powerup drop (pity guarantee)
+  private heartbeatT = 0;
+  private musicT = 0;
+  private moveTrailAcc = 0;
+  private rerollsLeft = 1;
+  // v4 goals & feel
+  private victoryT = -1; // >=0 while the victory cinematic plays
+  private deathBy: string | null = null;
+  private dashKickX = 0;
+  private dashKickY = 0;
 
   // cached background gradients (rebuilt on resize)
   private bgGrad: CanvasGradient | null = null;
@@ -267,7 +293,7 @@ export class GameEngine {
     if (!ctx) throw new Error('no 2d context');
     this.ctx = ctx;
     this.cb = cb;
-    this.opts = opts;
+    this.opts = { showDamageNumbers: true, ...opts };
     this.baseParticleScale = opts.particleScale;
     this.fx.scale = opts.particleScale;
     this.audio.muted = opts.muted;
@@ -328,7 +354,7 @@ export class GameEngine {
   }
 
   setPaused(p: boolean): void {
-    if (this.upgradeLock || this.deathT >= 0) {
+    if (this.upgradeLock || this.deathT >= 0 || this.victoryT >= 0) {
       this.paused = p ? true : this.paused;
       return;
     }
@@ -379,6 +405,23 @@ export class GameEngine {
     this.emitHud();
   }
 
+  /** skip the pick for +20 HP — a strategic valve when nothing fits the build */
+  skipUpgrade(): void {
+    if (!this.upgradeLock) return;
+    this.hp = Math.min(this.stats.maxHp, this.hp + 20);
+    this.fx.pickupBurst(this.px, this.py, '#aab3cc');
+    this.audio.uiClick();
+    this.pendingLevels = Math.max(0, this.pendingLevels - 1);
+    if (this.pendingLevels > 0) {
+      this.cb.onLevelUp(rollUpgrades(this.taken, 3));
+    } else {
+      this.upgradeLock = false;
+      this.paused = false;
+      this.last = performance.now();
+    }
+    this.emitHud();
+  }
+
   tryDash(): void {
     if (this.paused || this.deathT >= 0) return;
     if (this.dashCd > 0 || this.dashT > 0) return;
@@ -394,6 +437,8 @@ export class GameEngine {
     this.dashT = 0.18;
     this.dashCd = this.stats.dashCooldownMax;
     this.invuln = Math.max(this.invuln, 0.28);
+    this.dashKickX = this.dashDx * 26;
+    this.dashKickY = this.dashDy * 26;
     this.audio.dash();
     this.fx.shockwave(this.px, this.py, '#00f0ff', 90, 0.3, 3);
   }
@@ -437,6 +482,10 @@ export class GameEngine {
     this.shards = 0; this.hives = 0;
     this.hurtFlash = 0; this.recoil = 0;
     this.bossSpiralAnn = false; this.bossEnrageAnn = false;
+    this.pityT = 0; this.heartbeatT = 0; this.musicT = 0;
+    this.moveTrailAcc = 0; this.rerollsLeft = 1;
+    this.victoryT = -1; this.deathBy = null;
+    this.dashKickX = 0; this.dashKickY = 0;
     this.qualityT = 0; this.goodT = 0;
     this.gridPulse = 0; this.orbitalAngle = 0;
     this.deathT = -1;
@@ -520,7 +569,9 @@ export class GameEngine {
     if (!unlockAchievement(id)) return;
     const def = achievementDef(id);
     this.audio.powerup();
-    this.setAnnounce(`🏆 اچیومنت: ${def ? def.nameFa : id}`, 2.6, 2);
+    // v3.2: achievements now pay 3 void shards — progression feels rewarding
+    this.awardShards(3);
+    this.setAnnounce(`🏆 اچیومنت: ${def ? def.nameFa : id} (+3 ◇)`, 2.6, 2);
   }
 
   /** void shards: permanent meta currency, shown floating at pickup point */
@@ -690,15 +741,15 @@ export class GameEngine {
     // rebuild cached background gradients (was: allocated every frame)
     const ctx = this.ctx;
     const bg = ctx.createLinearGradient(0, 0, 0, this.viewH);
-    bg.addColorStop(0, '#07071c');
-    bg.addColorStop(1, '#050514');
+    bg.addColorStop(0, '#070713');
+    bg.addColorStop(1, '#040410');
     this.bgGrad = bg;
     const vg = ctx.createRadialGradient(
-      this.viewW / 2, this.viewH / 2, Math.min(this.viewW, this.viewH) * 0.42,
-      this.viewW / 2, this.viewH / 2, Math.max(this.viewW, this.viewH) * 0.75,
+      this.viewW / 2, this.viewH / 2, Math.min(this.viewW, this.viewH) * 0.45,
+      this.viewW / 2, this.viewH / 2, Math.max(this.viewW, this.viewH) * 0.78,
     );
     vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(0,0,0,0.5)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.42)');
     this.vigGrad = vg;
   }
 
@@ -712,6 +763,35 @@ export class GameEngine {
 
   setGameSpeed(s: number): void {
     this.opts.speed = s === 0.9 || s === 1.25 ? s : 1;
+  }
+
+  setShowDamageNumbers(b: boolean): void {
+    this.opts.showDamageNumbers = b;
+  }
+
+  /** current upgrade stacks for UI (upgrade modal / pause build view) */
+  getTakenStacks(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const [k, v] of this.taken) out[k] = v;
+    return out;
+  }
+
+  getStatsSnapshot(): PlayerStats {
+    return { ...this.stats };
+  }
+
+  getRerollsLeft(): number {
+    return this.rerollsLeft;
+  }
+
+  /** reroll level-up choices once per level (adds risk-free build control) */
+  rerollUpgrades(): import('./types').UpgradeDef[] | null {
+    if (!this.upgradeLock || this.rerollsLeft <= 0) return null;
+    this.rerollsLeft -= 1;
+    this.audio.reroll();
+    const choices = rollUpgrades(this.taken, 3);
+    this.cb.onLevelUp(choices);
+    return choices;
   }
 
   private applyQuality(): void {
@@ -840,8 +920,11 @@ export class GameEngine {
       fireRate: this.stats.fireRate,
       moveSpeed: this.stats.moveSpeed,
       critChance: this.stats.critChance,
+      critMult: this.stats.critMult,
+      multishot: this.stats.multishot,
       intermission: Math.max(0, this.intermission),
       waveProgress: clamp(this.waveKills / Math.max(1, this.waveQuota), 0, 1),
+      waveLeft: Math.max(0, this.waveQuota - this.waveKills),
       announce: this.announceT > 0 ? this.announce : null,
       powerups: active,
       orbitals: this.stats.orbitals,
@@ -883,41 +966,57 @@ export class GameEngine {
       this.updateCamera(dt);
       if (this.deathT > 1.15 && !this.gameOverSent) {
         this.gameOverSent = true;
-        const upgrades = [...this.taken.keys()];
-        const score = Math.floor(this.score);
-        const isBest = saveBest(score) || false;
-        pushBoard({
-          score, wave: this.wave, kills: this.kills,
-          time: Math.floor(this.time), ship: this.opts.ship, date: Date.now(),
-        });
-        addTotals(this.kills, this.time, this.wave);
-        addShards(this.shards); // bank void shards into the permanent wallet
-        const result: GameResult = {
-          score,
-          kills: this.kills,
-          elites: this.elites,
-          wave: this.wave,
-          level: this.level,
-          time: this.time,
-          maxCombo: this.maxCombo,
-          grade: this.calcGrade(),
-          isBest,
-          upgradesTaken: upgrades,
-          ship: this.opts.ship,
-          shards: this.shards,
-          powerups: this.powerupsCollected,
-        };
-        this.audio.gameOver();
-        this.cb.onGameOver(result);
+        this.sendResult(false);
+      }
+      return;
+    }
+    if (this.victoryT >= 0) {
+      this.victoryT += dt;
+      this.updateBullets(dt);
+      this.updateEnemies(dt);
+      this.fx.update(dt);
+      this.updateCamera(dt);
+      // celebratory fireworks while the banner soaks in
+      if (Math.random() < dt * 6) {
+        this.fx.explosion(
+          this.px + rand(-260, 260), this.py + rand(-200, 200),
+          ['#a8ecff', '#f2e6c8', '#e8b4c8'][Math.floor(Math.random() * 3)], 12, 300,
+        );
+      }
+      if (this.victoryT > 2.2 && !this.gameOverSent) {
+        this.gameOverSent = true;
+        this.sendResult(true);
       }
       return;
     }
 
     this.time += dt;
     this.score += dt * (2 + this.wave * 0.6);
+    this.pityT += dt;
     if (this.time >= 300 && !this.announced5min) {
       this.announced5min = true;
       this.grantAchievement('survivor5');
+    }
+    // v3.2: adaptive music intensity + low-hp heartbeat
+    this.musicT += dt;
+    if (this.musicT >= 1) {
+      this.musicT = 0;
+      const inten = Math.max(
+        0,
+        Math.min(
+          1,
+          0.12 + this.wave * 0.05 + this.enemies.length * 0.008 + (this.boss ? 0.35 : 0) +
+            (this.hp < this.stats.maxHp * 0.3 ? 0.15 : 0),
+        ),
+      );
+      this.audio.setIntensity(inten);
+    }
+    if (this.hp < this.stats.maxHp * 0.3 && this.hp > 0) {
+      this.heartbeatT -= dt;
+      if (this.heartbeatT <= 0) {
+        this.heartbeatT = 1.1;
+        this.audio.heartbeat();
+      }
     }
 
     // timers
@@ -983,6 +1082,45 @@ export class GameEngine {
     return 'D';
   }
 
+  /** shared run-end bookkeeping for death AND victory (victory pays a shard bonus) */
+  private sendResult(victory: boolean): void {
+    const upgrades = [...this.taken.keys()];
+    const score = Math.floor(this.score + (victory ? 2500 : 0));
+    this.score = score;
+    const isBest = saveBest(score) || false;
+    pushBoard({
+      score, wave: this.wave, kills: this.kills,
+      time: Math.floor(this.time), ship: this.opts.ship, date: Date.now(),
+    });
+    addTotals(this.kills, this.time, this.wave);
+    if (victory) this.shards += 10;
+    addShards(this.shards);
+    const result: GameResult = {
+      score,
+      kills: this.kills,
+      elites: this.elites,
+      wave: this.wave,
+      level: this.level,
+      time: this.time,
+      maxCombo: this.maxCombo,
+      grade: victory ? 'S' : this.calcGrade(),
+      isBest,
+      upgradesTaken: upgrades,
+      ship: this.opts.ship,
+      shards: this.shards,
+      powerups: this.powerupsCollected,
+      victory,
+      deathBy: victory ? null : this.deathBy,
+    };
+    if (victory) {
+      this.audio.duck(1.2);
+      this.audio.powerup();
+    } else {
+      this.audio.gameOver();
+    }
+    this.cb.onGameOver(result);
+  }
+
   private moveInput(): { x: number; y: number } {
     let x = 0;
     let y = 0;
@@ -1024,6 +1162,15 @@ export class GameEngine {
       const k = Math.min(1, dt * 10);
       this.pvx += (tx - this.pvx) * k;
       this.pvy += (ty - this.pvy) * k;
+      // v3.2: speed trail — moving fast leaves ion sparks in ship color
+      const spd = Math.hypot(this.pvx, this.pvy);
+      if (spd > 300) {
+        this.moveTrailAcc -= dt;
+        if (this.moveTrailAcc <= 0) {
+          this.moveTrailAcc = 0.05;
+          this.fx.trail(this.px, this.py, this.shipColor());
+        }
+      }
     }
     this.px = clamp(this.px + this.pvx * dt, 24, WORLD_W - 24);
     this.py = clamp(this.py + this.pvy * dt, 24, WORLD_H - 24);
@@ -1104,6 +1251,7 @@ export class GameEngine {
   }
 
   private updateDirector(dt: number): void {
+    if (this.victoryT >= 0) return;
     if (this.intermission > 0) {
       this.intermission -= dt;
       if (this.intermission <= 0) {
@@ -1128,19 +1276,38 @@ export class GameEngine {
     const d = DIFF[this.opts.difficulty];
     this.spawnT -= dt;
     const aliveWeight = this.enemies.length;
-    const cap = Math.min(130, 14 + this.wave * 5);
+    const cap = Math.min(150, 16 + this.wave * 6);
     if (this.spawnT <= 0 && aliveWeight < cap && this.waveKills < this.waveQuota) {
-      let interval = Math.max(0.12, (rand(0.45, 1.0) - this.wave * 0.05) * d.interval);
+      // v3.2: snappier early game — denser spawns from wave 3
+      let interval = Math.max(0.1, (rand(0.4, 0.85) - this.wave * 0.055) * d.interval);
       if (this.mutator === 'swarm') interval *= 0.55;
       this.spawnT = interval;
-      const batch = this.wave >= 5 ? (Math.random() < 0.35 ? 2 : 1) : 1;
+      const r = Math.random();
+      const batch = this.wave >= 6 && r < 0.22 ? 3 : this.wave >= 3 && r < 0.42 ? 2 : 1;
       for (let i = 0; i < batch; i++) this.spawnEnemy();
     }
-    if (this.waveKills >= this.waveQuota && this.enemies.length === 0 && this.deathT < 0) {
-      // wave cleared
+    if (this.waveKills >= this.waveQuota && this.enemies.length === 0 && this.deathT < 0 && this.victoryT < 0) {
+      // wave cleared — vacuum gems briefly so rewards feel instant
       this.score += 100 * this.wave;
       this.hp = Math.min(this.stats.maxHp, this.hp + this.stats.maxHp * 0.12);
+      this.magnetAllT = Math.max(this.magnetAllT, 1.6);
+      if (this.wave >= WIN_WAVE) {
+        // ★ VICTORY — the void is conquered. Endless continues after the screen.
+        this.victoryT = 0;
+        this.slowmoT = Math.max(this.slowmoT, 1.2);
+        this.trauma = Math.min(1, this.trauma + 0.4);
+        this.fx.shockwave(this.px, this.py, '#f2e6c8', 420, 1, 7);
+        this.fx.explosion(this.px, this.py, '#f2e6c8', 60, 520);
+        this.setAnnounce(`✦ پیروزی! خلأ در موج ${WIN_WAVE} رام شد (+10 ◇)`, 3, 3);
+        this.audio.duck(1.2);
+        this.audio.levelup();
+        this.emitHud();
+        return;
+      }
       this.setAnnounce(`موج ${this.wave} پاکسازی شد! +${100 * this.wave}`, 2, 1);
+      if (this.wave === WIN_WAVE - 1) {
+        this.setAnnounce(`موج ${this.wave} پاکسازی شد! یک موج تا پیروزی…`, 2.4, 2);
+      }
       this.fx.shockwave(this.px, this.py, '#ffd319', 200, 0.6, 5);
       this.audio.levelup();
       this.intermission = 2.0;
@@ -1315,13 +1482,24 @@ export class GameEngine {
       base.r *= 1.22;
       base.speed *= 1.06;
       // v2.1 elite affix: volatile explodes, swift is faster
+      // v3.2: + bulwark (juggernaut) & echo (rich loot)
       const roll = Math.random();
-      if (roll < 0.35) {
+      if (roll < 0.28) {
         base.affix = 'volatile';
         base.score = Math.round(base.score * 1.25);
-      } else if (roll < 0.65) {
+      } else if (roll < 0.5) {
         base.affix = 'swift';
         base.speed *= 1.3;
+      } else if (roll < 0.68) {
+        base.affix = 'bulwark';
+        base.hp = base.maxHp = Math.round(base.maxHp * 1.45);
+        base.speed *= 0.86;
+        base.score = Math.round(base.score * 1.5);
+        base.r *= 1.1;
+      } else if (roll < 0.84) {
+        base.affix = 'echo';
+        base.xp *= 2;
+        base.score = Math.round(base.score * 1.5);
       }
     }
     return base;
@@ -1350,6 +1528,7 @@ export class GameEngine {
     this.bossSpiralAnn = false;
     this.bossEnrageAnn = false;
     this.audio.bossSpawn();
+    this.audio.duck(1.0);
     this.trauma = Math.min(1, this.trauma + 0.7);
     this.fx.shockwave(p.x, p.y, '#ff2244', 320, 0.8, 7);
     this.fx.text(p.x, p.y - 60, 'BOSS', '#ff2244', 30);
@@ -1679,20 +1858,23 @@ export class GameEngine {
       e.y = clamp(e.y + e.vy * dt, e.r, WORLD_H - e.r);
     }
 
-    // separation (cheap, capped)
+    // separation (cheap, capped — uses squared early-out, no sqrt unless overlapping)
     const n = this.enemies.length;
-    if (n > 1 && n < 140) {
+    if (n > 1 && n <= 170) {
+      const sepK = Math.min(1, dt * 60);
       for (let i = 0; i < n; i++) {
         const a = this.enemies[i];
         for (let j = i + 1; j < n; j++) {
           const b = this.enemies[j];
           const rr = a.r + b.r;
-          const d2 = dist2(a.x, a.y, b.x, b.y);
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const d2 = dx * dx + dy * dy;
           if (d2 > 0.01 && d2 < rr * rr) {
-            const d = Math.sqrt(d2);
-            const push = ((rr - d) / d) * 22 * dt * 60 * 0.016;
-            const nx = (b.x - a.x) / d;
-            const ny = (b.y - a.y) / d;
+            const d = Math.sqrt(d2) || 1;
+            const push = ((rr - d) / d) * 1.4 * sepK;
+            const nx = dx / d;
+            const ny = dy / d;
             a.x -= nx * push;
             a.y -= ny * push;
             b.x += nx * push;
@@ -1733,7 +1915,7 @@ export class GameEngine {
       const rr = b.r + pr;
       if (dist2(b.x, b.y, this.px, this.py) < rr * rr) {
         b.dead = true;
-        this.damagePlayer(b.dmg, b.x, b.y);
+        this.damagePlayer(b.dmg, b.x, b.y, 'گلوله دشمن');
       }
     }
     // enemies vs player (only nearby cells around the player)
@@ -1742,7 +1924,7 @@ export class GameEngine {
       if (e.spawnT > 0) return; // phasing in: harmless
       const rr = e.r + pr - 2;
       if (dist2(e.x, e.y, this.px, this.py) < rr * rr) {
-        this.damagePlayer(e.dmg, e.x, e.y);
+        this.damagePlayer(e.dmg, e.x, e.y, ENEMY_FA[e.kind]);
         if (thorns > 0 && e.hp > 0) {
           this.damageEnemy(e, thorns, false, e.x - this.px, e.y - this.py);
         }
@@ -1797,11 +1979,15 @@ export class GameEngine {
     e.kx += (vx / l) * kb;
     e.ky += (vy / l) * kb;
     this.fx.explosion(e.x, e.y, ENEMY_COLOR[e.kind], crit ? 7 : 3, 200);
+    const showNums = this.opts.showDamageNumbers !== false;
     if (crit || dmg >= 30) {
-      this.fx.text(e.x, e.y - e.r, String(Math.round(dmg)), crit ? '#ffd319' : '#ffffff', crit ? 17 : 13);
-    } else {
-      // chip damage still gets feedback (small gray numbers, pooled)
-      this.fx.text(e.x, e.y - e.r, String(Math.round(dmg)), 'rgba(226,232,255,0.85)', 11);
+      this.fx.text(e.x, e.y - e.r, String(Math.round(dmg)), crit ? '#f2e6c8' : '#e8ecf5', crit ? 15 : 12);
+    } else if (showNums) {
+      // chaos throttle: in heavy fights chip numbers would starve crits from the pool
+      const chaos = this.enemies.length > 40 || this.fpsEMA < 50;
+      if (!chaos || Math.random() < 0.4) {
+        this.fx.text(e.x, e.y - e.r, String(Math.round(dmg)), 'rgba(200,210,230,0.7)', 10);
+      }
     }
     if (e.hp <= 0) {
       this.hitstopT = Math.max(this.hitstopT, e.kind === 'boss' ? 0.1 : e.elite ? 0.06 : 0.02);
@@ -1814,6 +2000,7 @@ export class GameEngine {
     this.combo += 1;
     this.comboT = comboWindow(this.taken);
     this.maxCombo = Math.max(this.maxCombo, this.combo);
+    if (this.combo >= 5) this.audio.comboTick(this.combo);
     const comboMult = 1 + Math.min(2 + (this.taken.get('combomaster') ?? 0), this.combo * 0.02 * comboScoreMult(this.taken));
     const mutMult = this.mutator ? MUTATORS[this.mutator].scoreMult : 1;
     const pts = e.score * (1 + this.wave * 0.08) * comboMult * mutMult;
@@ -1845,6 +2032,7 @@ export class GameEngine {
 
     if (e.kind === 'boss') {
       this.slowmoT = 1.0;
+      this.audio.duck(1.0);
       this.fx.text(e.x, e.y, `+${Math.round(pts)}`, '#ffd319', 26);
       this.dropPowerup(e.x, e.y, true);
       this.grantAchievement('boss1');
@@ -1860,8 +2048,9 @@ export class GameEngine {
       }
       this.boss = null;
     } else {
-      // gems (doubled during gold rush)
-      const gemVal = e.xp * (this.mutator === 'gold_rush' ? 2 : 1);
+      // gems (doubled during gold rush; echo elites drop double again)
+      const echoMult = e.affix === 'echo' ? 2 : 1;
+      const gemVal = e.xp * (this.mutator === 'gold_rush' ? 2 : 1) * echoMult;
       const parts = e.xp >= 10 ? 3 : 1;
       for (let i = 0; i < parts; i++) {
         this.gems.push({
@@ -1905,6 +2094,7 @@ export class GameEngine {
       if (!guaranteed) return;
       this.powerups.shift();
     }
+    this.pityT = 0;
     const kinds: PowerUpKind[] = ['shield', 'magnet', 'nuke', 'overdrive', 'heal', 'frost'];
     const kind = guaranteed && Math.random() < 0.5 ? 'heal' : kinds[Math.floor(Math.random() * kinds.length)];
     this.powerups.push({
@@ -1915,6 +2105,15 @@ export class GameEngine {
   }
 
   private updatePowerups(dt: number): void {
+    // v3.2 pity: never go 50s without a powerup — the game must keep giving toys
+    if (this.pityT > 50 && this.powerups.length < 3 && this.deathT < 0) {
+      const a = Math.random() * TAU;
+      this.dropPowerup(
+        clamp(this.px + Math.cos(a) * 220, 40, WORLD_W - 40),
+        clamp(this.py + Math.sin(a) * 220, 40, WORLD_H - 40),
+        false,
+      );
+    }
     for (const p of this.powerups) {
       p.t += dt;
       p.life -= dt;
@@ -1971,6 +2170,7 @@ export class GameEngine {
 
   private detonateNuke(): void {
     this.audio.nuke();
+    this.audio.duck(0.9);
     this.trauma = 1;
     this.gridPulse = 1;
     this.slowmoT = Math.max(this.slowmoT, 0.45);
@@ -2027,20 +2227,21 @@ export class GameEngine {
     if (novaStacks > 0) {
       this.novaCd -= dt;
       if (this.novaCd <= 0) {
-        this.novaCd = Math.max(4, 8 - novaStacks);
-        const n = 8 + 4 * novaStacks;
-        const dmg = this.stats.damage * 1.2;
+        this.novaCd = Math.max(3.2, 7.5 - novaStacks * 1.1);
+        const n = 10 + 4 * novaStacks;
+        const dmg = this.stats.damage * (1.25 + 0.15 * novaStacks);
         for (let i = 0; i < n; i++) {
           const a = (i / n) * TAU + rand(-0.06, 0.06);
           const b = this.allocBullet(true);
           b.x = this.px; b.y = this.py;
-          b.vx = Math.cos(a) * 520; b.vy = Math.sin(a) * 520;
+          b.vx = Math.cos(a) * 560; b.vy = Math.sin(a) * 560;
           b.r = 5; b.dmg = dmg * rand(0.9, 1.1);
-          b.pierce = 1; b.life = 0.9; b.crit = false;
+          b.pierce = 2; b.life = 0.9; b.crit = false;
           b.tint = '#ff9f1c';
           this.bullets.push(b);
         }
-        this.fx.shockwave(this.px, this.py, '#ff9f1c', 200, 0.5, 6);
+        this.fx.shockwave(this.px, this.py, '#ff9f1c', 220, 0.5, 6);
+        this.fx.explosion(this.px, this.py, '#ff9f1c', 10, 300);
         this.audio.nova();
         this.trauma = Math.min(1, this.trauma + 0.15);
       }
@@ -2049,24 +2250,30 @@ export class GameEngine {
     if (seekerStacks > 0) {
       this.seekerCd -= dt;
       if (this.seekerCd <= 0) {
-        this.seekerCd = Math.max(1.6, 3 - 0.3 * seekerStacks);
-        const tgt = this.nearestEnemy(1100);
-        const a = tgt ? angleTo(this.px, this.py, tgt.x, tgt.y) : this.aim;
-        const b = this.allocBullet(true);
-        b.x = this.px; b.y = this.py;
-        b.vx = Math.cos(a) * 640; b.vy = Math.sin(a) * 640;
-        b.r = 6; b.dmg = this.stats.damage * 1.5 * seekerStacks;
-        b.pierce = 0; b.life = 3; b.crit = true;
-        b.homing = true; b.tint = '#ff9f1c';
-        this.bullets.push(b);
-        this.fx.muzzle(this.px, this.py, a, '#ff9f1c');
+        this.seekerCd = Math.max(1.2, 2.8 - 0.4 * seekerStacks);
+        // v3.2: 3+ stacks fire a twin volley — seeker fantasy finally pays off
+        const volley = seekerStacks >= 3 ? 2 : 1;
+        for (let v = 0; v < volley; v++) {
+          const tgt = this.nearestEnemy(1200);
+          const a = tgt
+            ? angleTo(this.px, this.py, tgt.x, tgt.y) + (volley > 1 ? (v === 0 ? -0.18 : 0.18) : 0)
+            : this.aim;
+          const b = this.allocBullet(true);
+          b.x = this.px; b.y = this.py;
+          b.vx = Math.cos(a) * 680; b.vy = Math.sin(a) * 680;
+          b.r = 6; b.dmg = this.stats.damage * 1.6 * seekerStacks;
+          b.pierce = 0; b.life = 3; b.crit = true;
+          b.homing = true; b.tint = '#ff9f1c';
+          this.bullets.push(b);
+        }
+        this.fx.muzzle(this.px, this.py, this.aim, '#ff9f1c');
         this.audio.shoot();
       }
     }
   }
 
-  private damagePlayer(raw: number, fromX: number, fromY: number): void {
-    if (this.invuln > 0 || this.dashT > 0 || this.deathT >= 0) return;
+  private damagePlayer(raw: number, fromX: number, fromY: number, source: string | null = null): void {
+    if (this.invuln > 0 || this.dashT > 0 || this.deathT >= 0 || this.victoryT >= 0) return;
     if (this.shieldT > 0) {
       // shield absorbs the hit with a spark
       this.invuln = 0.4;
@@ -2076,6 +2283,7 @@ export class GameEngine {
     }
     const dmg = Math.max(1, raw - this.stats.armor);
     this.hp -= dmg;
+    if (source) this.deathBy = source;
     if (this.boss) this.bossDamageTaken = true;
     this.invuln = 0.55;
     this.combo = 0;
@@ -2089,11 +2297,11 @@ export class GameEngine {
     this.pvx += Math.cos(a) * 260;
     this.pvy += Math.sin(a) * 260;
     if (this.hp <= 0) {
-      // v3 Second Wind: cheat death once per 90s per stack level
+      // v3 Second Wind: cheat death — 2 stacks = shorter cd + bigger heal
       const sw = this.taken.get('secondwind') ?? 0;
       if (sw > 0 && this.swCd <= 0) {
-        this.swCd = 90;
-        this.hp = Math.round(this.stats.maxHp * 0.3);
+        this.swCd = sw >= 2 ? 60 : 85;
+        this.hp = Math.round(this.stats.maxHp * (sw >= 2 ? 0.45 : 0.32));
         this.invuln = 2;
         this.trauma = 1;
         this.slowmoT = Math.max(this.slowmoT, 0.8);
@@ -2127,6 +2335,7 @@ export class GameEngine {
     if (this.pendingLevels > 0 && !this.upgradeLock) {
       this.upgradeLock = true;
       this.paused = true;
+      this.rerollsLeft = 1; // fresh reroll every level-up
       this.audio.levelup();
       // level-up beam: stacked shockwaves + floating text
       this.fx.shockwave(this.px, this.py, '#a3ff12', 220, 0.6, 5);
@@ -2180,8 +2389,16 @@ export class GameEngine {
   }
 
   private updateCamera(dt: number): void {
-    const tx = clamp(this.px - this.viewW / 2, 0, Math.max(0, WORLD_W - this.viewW));
-    const ty = clamp(this.py - this.viewH / 2, 0, Math.max(0, WORLD_H - this.viewH));
+    // v4 lookahead: the camera leans toward aim + velocity + dash kick,
+    // so the player sees where they're going instead of where they've been
+    this.dashKickX *= 1 - Math.min(1, dt * 5);
+    this.dashKickY *= 1 - Math.min(1, dt * 5);
+    const lookX =
+      Math.cos(this.aim) * 52 + this.pvx * 0.1 + this.dashKickX;
+    const lookY =
+      Math.sin(this.aim) * 52 + this.pvy * 0.1 + this.dashKickY;
+    const tx = clamp(this.px + lookX - this.viewW / 2, 0, Math.max(0, WORLD_W - this.viewW));
+    const ty = clamp(this.py + lookY - this.viewH / 2, 0, Math.max(0, WORLD_H - this.viewH));
     // if world smaller than view, center
     const cx = WORLD_W < this.viewW ? (WORLD_W - this.viewW) / 2 : tx;
     const cy = WORLD_H < this.viewH ? (WORLD_H - this.viewH) / 2 : ty;
@@ -2205,7 +2422,7 @@ export class GameEngine {
     let shX = 0;
     let shY = 0;
     if (this.opts.shakeEnabled && this.trauma > 0) {
-      const s = this.trauma * this.trauma * 22;
+      const s = this.trauma * this.trauma * 16;
       shX = rand(-s, s);
       shY = rand(-s, s);
     }
@@ -2215,22 +2432,22 @@ export class GameEngine {
     // stars (screen space parallax)
     this.fx.drawStars(ctx, { x: camX, y: camY }, this.viewW, this.viewH);
 
-    // v2.1: nebula blobs — 3 baked radial sprites, screen-space, near-zero cost
+    // tasteful nebula — faint, slow, never competing with gameplay
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const t = performance.now() / 1000;
-    drawGlow(ctx, '#1a2a6c', this.viewW * 0.22 + Math.sin(t * 0.07) * 30, this.viewH * 0.3, 320, 0.5);
-    drawGlow(ctx, '#4a1140', this.viewW * 0.8 + Math.cos(t * 0.05) * 40, this.viewH * 0.65, 380, 0.45);
-    drawGlow(ctx, '#0b3b4a', this.viewW * 0.55, this.viewH * 0.9 + Math.sin(t * 0.06) * 26, 300, 0.4);
+    drawGlow(ctx, '#16245e', this.viewW * 0.22 + Math.sin(t * 0.05) * 26, this.viewH * 0.28, 340, 0.32);
+    drawGlow(ctx, '#3d1038', this.viewW * 0.8 + Math.cos(t * 0.04) * 34, this.viewH * 0.66, 400, 0.28);
+    drawGlow(ctx, '#0a3340', this.viewW * 0.55, this.viewH * 0.9 + Math.sin(t * 0.045) * 22, 320, 0.26);
     ctx.restore();
 
     ctx.save();
     ctx.translate(-camX, -camY);
 
-    // grid (pulses on big kills / nukes)
+    // grid — hairline, breathes only on big moments
     const pulse = this.gridPulse;
-    ctx.strokeStyle = `rgba(0,240,255,${(0.07 + pulse * 0.25).toFixed(3)})`;
-    ctx.lineWidth = 1 + pulse * 1.5;
+    ctx.strokeStyle = `rgba(148,178,255,${(0.05 + pulse * 0.16).toFixed(3)})`;
+    ctx.lineWidth = 1;
     const step = 100;
     const x0 = Math.floor(camX / step) * step;
     const y0 = Math.floor(camY / step) * step;
@@ -2245,38 +2462,49 @@ export class GameEngine {
     }
     ctx.stroke();
 
-    // arena border (layered strokes instead of shadowBlur)
-    ctx.strokeStyle = 'rgba(0,240,255,0.16)';
-    ctx.lineWidth = 9;
+    // arena border — quiet double hairline
+    ctx.strokeStyle = 'rgba(148,178,255,0.1)';
+    ctx.lineWidth = 6;
     ctx.strokeRect(0, 0, WORLD_W, WORLD_H);
-    ctx.strokeStyle = 'rgba(0,240,255,0.5)';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(148,178,255,0.28)';
+    ctx.lineWidth = 1.5;
     ctx.strokeRect(0, 0, WORLD_W, WORLD_H);
 
-    // gems (single baked sprite drawImage — no save/rotate per gem)
-    const gemSpr = gemSprite();
+    // gems — tiered colors (green/blue/gold), restrained pulse
     for (const g of this.gems) {
-      const pulse = 1 + Math.sin(g.t * 6) * 0.22;
-      const s = 30 * pulse * (g.val >= 20 ? 1.35 : 1);
-      ctx.drawImage(gemSpr, g.x - s / 2, g.y - s / 2, s, s);
+      const tier = gemTierFor(g.val);
+      if (tier === 2) drawGlow(ctx, '#ffd319', g.x, g.y, 22, 0.3);
+      const pulse = 1 + Math.sin(g.t * 5) * 0.12;
+      const s = 24 * pulse * (tier === 2 ? 1.3 : tier === 1 ? 1.12 : 1);
+      const spr = gemSpriteTier(tier);
+      ctx.drawImage(spr, g.x - s / 2, g.y - s / 2, s, s);
     }
 
-    // powerups (world space, bobbing + glow ring; baked glow, no shadow)
+    // powerups — calm bob, rotating dashed halo, soft glow
     const nowMs = performance.now();
     for (const p of this.powerups) {
-      const bob = Math.sin((nowMs / 300) + p.x) * 4;
-      const blink = p.life < 5 ? (Math.sin(nowMs / 120) > 0 ? 1 : 0.35) : 1;
-      drawGlow(ctx, POWERUP_COLOR[p.kind], p.x, p.y + bob, 30, blink);
+      const bob = Math.sin(nowMs / 420 + p.x * 0.05) * 3;
+      const blink = p.life < 5 ? (Math.sin(nowMs / 140) > 0 ? 1 : 0.4) : 1;
+      drawGlow(ctx, POWERUP_COLOR[p.kind], p.x, p.y + bob, 26, 0.5 * blink);
       ctx.save();
       ctx.globalAlpha = blink;
       ctx.translate(p.x, p.y + bob);
       ctx.strokeStyle = POWERUP_COLOR[p.kind];
-      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.55 * blink;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 6]);
+      ctx.lineDashOffset = -nowMs / 400;
       ctx.beginPath();
-      ctx.arc(0, 0, 15, 0, TAU);
+      ctx.arc(0, 0, 17, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = blink;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, 12.5, 0, TAU);
       ctx.stroke();
       ctx.fillStyle = POWERUP_COLOR[p.kind];
-      ctx.font = '13px sans-serif';
+      ctx.font = '11px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const glyph: Record<PowerUpKind, string> = {
@@ -2291,14 +2519,14 @@ export class GameEngine {
       this.drawEnemy(ctx, e);
     }
 
-    // dash ghosts (afterimages)
+    // dash ghosts — faint afterimages
     for (const g of this.ghosts) {
       ctx.save();
-      ctx.globalAlpha = (g.life / 0.35) * 0.45;
+      ctx.globalAlpha = (g.life / 0.35) * 0.3;
       ctx.translate(g.x, g.y);
       ctx.rotate(g.aim);
-      ctx.strokeStyle = '#00f0ff';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#bdf3ff';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(18, 0);
       ctx.lineTo(-12, 12);
@@ -2309,59 +2537,55 @@ export class GameEngine {
       ctx.restore();
     }
 
-    // orbital blades (baked glow + plain blade)
+    // orbital blades — restrained gold
     if (this.stats.orbitals > 0 && this.deathT < 0) {
       for (let i = 0; i < this.stats.orbitals; i++) {
         const a = this.orbitalAngle + (i / this.stats.orbitals) * TAU;
         const ox = this.px + Math.cos(a) * 74;
         const oy = this.py + Math.sin(a) * 74;
-        drawGlow(ctx, '#ffd319', ox, oy, 22, 0.85);
+        drawGlow(ctx, '#ffd319', ox, oy, 18, 0.5);
         ctx.save();
         ctx.translate(ox, oy);
         ctx.rotate(a * 3);
-        ctx.fillStyle = 'rgba(255,211,25,0.2)';
+        ctx.fillStyle = '#e8d9a8';
         ctx.beginPath();
-        ctx.arc(0, 0, 16, 0, TAU);
-        ctx.fill();
-        ctx.fillStyle = '#ffd319';
-        ctx.beginPath();
-        ctx.moveTo(11, 0);
-        ctx.lineTo(-7, 8);
-        ctx.lineTo(-7, -8);
+        ctx.moveTo(10, 0);
+        ctx.lineTo(-6, 7);
+        ctx.lineTo(-6, -7);
         ctx.closePath();
         ctx.fill();
         ctx.restore();
       }
     }
 
-    // friendly bullets (baked glow streaks — no shadow, no per-bullet save for core)
+    // friendly bullets — slimmer streaks, calm glow
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (const b of this.bullets) {
-      const col = b.tint ?? (b.crit ? '#ffd319' : '#00f0ff');
-      drawGlow(ctx, col, b.x, b.y, 14, 0.9);
+      const col = b.tint ?? (b.crit ? '#ffe9a8' : '#a8ecff');
+      drawGlow(ctx, col, b.x, b.y, 11, 0.55);
       const a = Math.atan2(b.vy, b.vx);
       ctx.save();
       ctx.translate(b.x, b.y);
       ctx.rotate(a);
       ctx.fillStyle = col;
-      ctx.fillRect(-10, -2.2, 20, 4.4);
+      ctx.fillRect(-8, -1.8, 16, 3.6);
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(8, 0, b.r * 0.45, 0, TAU);
+      ctx.arc(6, 0, b.r * 0.35, 0, TAU);
       ctx.fill();
       ctx.restore();
     }
-    // enemy bullets (baked glow + core)
+    // enemy bullets — readable, not blinding
     for (const b of this.ebullets) {
-      drawGlow(ctx, '#ff2d78', b.x, b.y, b.r + 8, 0.9);
-      ctx.fillStyle = '#ff2d78';
+      drawGlow(ctx, '#ff5d7e', b.x, b.y, b.r + 5, 0.55);
+      ctx.fillStyle = '#ff5d7e';
       ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r, 0, TAU);
+      ctx.arc(b.x, b.y, b.r * 0.9, 0, TAU);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r * 0.35, 0, TAU);
+      ctx.arc(b.x, b.y, b.r * 0.3, 0, TAU);
       ctx.fill();
     }
     ctx.restore();
@@ -2382,20 +2606,20 @@ export class GameEngine {
       ctx.fillRect(0, 0, this.viewW, this.viewH);
     }
 
-    // low hp pulse
+    // low hp — soft breath, not alarm
     const hpFrac = this.hp / this.stats.maxHp;
     if (hpFrac < 0.32 && this.deathT < 0) {
-      const a = (0.32 - hpFrac) * 1.6 + Math.sin(performance.now() / 240) * 0.06;
-      ctx.fillStyle = `rgba(255,20,60,${clamp(a, 0, 0.3).toFixed(3)})`;
+      const a = (0.32 - hpFrac) * 1.1 + Math.sin(performance.now() / 420) * 0.03;
+      ctx.fillStyle = `rgba(255,45,90,${clamp(a, 0, 0.2).toFixed(3)})`;
       ctx.fillRect(0, 0, this.viewW, this.viewH);
     }
 
-    // frost overlay: icy tint while time is slowed
+    // frost overlay — whisper of ice
     if (this.frostT > 0 && this.deathT < 0) {
-      ctx.fillStyle = 'rgba(125,211,252,0.07)';
+      ctx.fillStyle = 'rgba(125,211,252,0.045)';
       ctx.fillRect(0, 0, this.viewW, this.viewH);
-      ctx.strokeStyle = 'rgba(125,211,252,0.35)';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(125,211,252,0.22)';
+      ctx.lineWidth = 1.5;
       ctx.strokeRect(2, 2, this.viewW - 4, this.viewH - 4);
     }
 
@@ -2404,32 +2628,32 @@ export class GameEngine {
       this.drawOffscreenIndicators(ctx, camX, camY);
     }
 
-    // wave banner
+    // wave banner — editorial, quiet confidence
     if (this.waveBannerT > 0) {
       const t = this.waveBannerT;
       const alpha = clamp(t / 0.5, 0, 1) * clamp((2.2 - t) / 0.3 + 0.2, 0, 1);
       ctx.save();
-      ctx.globalAlpha = clamp(alpha, 0, 1);
+      ctx.globalAlpha = clamp(alpha, 0, 1) * 0.95;
       ctx.textAlign = 'center';
-      ctx.font = `900 ${Math.min(54, this.viewW / 12)}px Orbitron, Vazirmatn, sans-serif`;
-      ctx.lineWidth = 6;
-      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.font = `700 ${Math.min(40, this.viewW / 15)}px Orbitron, Vazirmatn, sans-serif`;
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = 'rgba(3,4,12,0.85)';
       const label = this.wave % 5 === 0 ? `WAVE ${this.wave} — BOSS` : `WAVE ${this.wave}`;
-      ctx.strokeText(label, this.viewW / 2, 120);
-      ctx.fillStyle = this.wave % 5 === 0 ? '#ff2244' : '#00f0ff';
-      ctx.shadowColor = ctx.fillStyle;
-      ctx.shadowBlur = 24;
-      ctx.fillText(label, this.viewW / 2, 120);
+      ctx.strokeText(label, this.viewW / 2, 116);
+      ctx.fillStyle = this.wave % 5 === 0 ? '#f2b8c1' : '#d9f4ff';
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 12;
+      ctx.fillText(label, this.viewW / 2, 116);
       ctx.restore();
     }
 
     if (this.intermission > 0 && this.deathT < 0) {
       ctx.save();
       ctx.textAlign = 'center';
-      ctx.globalAlpha = 0.9;
-      ctx.font = '700 15px Vazirmatn, sans-serif';
-      ctx.fillStyle = '#ffd319';
-      ctx.fillText(`موج بعدی تا ${this.intermission.toFixed(1)} ثانیه…`, this.viewW / 2, 156);
+      ctx.globalAlpha = 0.75;
+      ctx.font = '500 13px Vazirmatn, sans-serif';
+      ctx.fillStyle = '#aab3cc';
+      ctx.fillText(`موج بعدی تا ${this.intermission.toFixed(1)} ثانیه`, this.viewW / 2, 148);
       ctx.restore();
     }
 
@@ -2439,96 +2663,100 @@ export class GameEngine {
   private shipColor(): string {
     if (this.opts.ship === 'phantom') return '#b14bff';
     if (this.opts.ship === 'titan') return '#ffb020';
+    if (this.opts.ship === 'warden') return '#3dff8e';
     return '#00f0ff';
   }
 
   private drawPlayer(ctx: CanvasRenderingContext2D): void {
     const col = this.shipColor();
-    // baked glow sprite behind ship (was: alpha arc + shadowBlur hull)
-    drawGlow(ctx, col, this.px, this.py, 34, 0.55);
+    drawGlow(ctx, col, this.px, this.py, 30, 0.34);
     ctx.save();
     ctx.translate(this.px, this.py);
-    // overdrive aura
     if (this.overdriveT > 0) {
-      ctx.fillStyle = 'rgba(255,211,25,0.16)';
+      ctx.fillStyle = 'rgba(255,220,120,0.08)';
       ctx.beginPath();
-      ctx.arc(0, 0, 38 + Math.sin(performance.now() / 110) * 4, 0, TAU);
+      ctx.arc(0, 0, 34 + Math.sin(performance.now() / 140) * 3, 0, TAU);
       ctx.fill();
     }
-    // dash trail direction
     ctx.rotate(this.aim);
-    // engine flame (layered alpha instead of shadowBlur)
-    const flame = 12 + Math.sin(performance.now() / 60) * 4 + Math.hypot(this.pvx, this.pvy) / 60;
-    ctx.fillStyle = 'rgba(255,159,28,0.35)';
+    // engine flame — shorter, softer
+    const flame = 9 + Math.sin(performance.now() / 70) * 2.5 + Math.hypot(this.pvx, this.pvy) / 90;
+    ctx.fillStyle = 'rgba(255,170,80,0.28)';
     ctx.beginPath();
-    ctx.moveTo(-12, 10);
-    ctx.lineTo(-12 - flame - 6, 0);
-    ctx.lineTo(-12, -10);
+    ctx.moveTo(-11, 8);
+    ctx.lineTo(-11 - flame - 4, 0);
+    ctx.lineTo(-11, -8);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = '#ff9f1c';
+    ctx.fillStyle = '#ffc46b';
     ctx.beginPath();
-    ctx.moveTo(-12, 7);
-    ctx.lineTo(-12 - flame, 0);
-    ctx.lineTo(-12, -7);
+    ctx.moveTo(-11, 5.5);
+    ctx.lineTo(-11 - flame, 0);
+    ctx.lineTo(-11, -5.5);
     ctx.closePath();
     ctx.fill();
-    // hull (outer glow stroke replaces shadowBlur)
-    ctx.fillStyle = '#0b1026';
+    // hull — dark body, crisp 2px stroke, inner highlight
+    ctx.fillStyle = '#0c1128';
     ctx.strokeStyle = col;
     ctx.beginPath();
-    ctx.moveTo(18, 0);
-    ctx.lineTo(-12, 12);
-    ctx.lineTo(-6, 0);
-    ctx.lineTo(-12, -12);
+    ctx.moveTo(17, 0);
+    ctx.lineTo(-11, 11);
+    ctx.lineTo(-5.5, 0);
+    ctx.lineTo(-11, -11);
     ctx.closePath();
     ctx.fill();
-    ctx.globalAlpha = 0.35;
-    ctx.lineWidth = 6;
+    ctx.globalAlpha = 0.28;
+    ctx.lineWidth = 5;
     ctx.stroke();
     ctx.globalAlpha = 1;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2;
     ctx.stroke();
-    // cockpit dot
-    ctx.fillStyle = col;
+    // spine highlight
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(3, 0, 4.2, 0, TAU);
+    ctx.moveTo(12, 0);
+    ctx.lineTo(-4, 0);
+    ctx.stroke();
+    // cockpit
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(3.5, 0, 2.6, 0, TAU);
     ctx.fill();
-    // hurt flash: white impact overlay (drawn in ship-local space)
     if (this.hurtFlash > 0) {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      drawGlow(ctx, '#ffffff', 0, 0, 30, Math.min(1, this.hurtFlash * 4));
+      drawGlow(ctx, '#ffffff', 0, 0, 26, Math.min(0.7, this.hurtFlash * 3));
       ctx.restore();
     }
     ctx.restore();
 
-    // energy shield bubble (powerup) — baked glow, no shadow
+    // energy shield — thin double ring
     if (this.shieldT > 0) {
-      drawGlow(ctx, '#00e5ff', this.px, this.py, 44, 0.7);
+      drawGlow(ctx, '#7deeff', this.px, this.py, 36, 0.35);
       ctx.save();
-      ctx.globalAlpha = 0.55 + Math.sin(performance.now() / 140) * 0.15;
-      ctx.strokeStyle = '#00e5ff';
-      ctx.lineWidth = 2.5;
+      ctx.globalAlpha = 0.5 + Math.sin(performance.now() / 160) * 0.1;
+      ctx.strokeStyle = '#a8ecff';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(this.px, this.py, 30, 0, TAU);
+      ctx.arc(this.px, this.py, 28, 0, TAU);
       ctx.stroke();
-      ctx.globalAlpha = 0.12;
-      ctx.fillStyle = '#00e5ff';
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = '#a8ecff';
       ctx.beginPath();
-      ctx.arc(this.px, this.py, 30, 0, TAU);
+      ctx.arc(this.px, this.py, 28, 0, TAU);
       ctx.fill();
       ctx.restore();
     }
 
-    // shield ring
+    // i-frame ring
     if (this.invuln > 0 || this.dashT > 0) {
       ctx.save();
-      ctx.globalAlpha = clamp(this.invuln * 2, 0.15, 0.7);
-      ctx.strokeStyle = this.dashT > 0 ? '#ffffff' : '#00f0ff';
-      ctx.lineWidth = 2;
+      ctx.globalAlpha = clamp(this.invuln * 1.6, 0.12, 0.5);
+      ctx.strokeStyle = this.dashT > 0 ? '#ffffff' : '#a8ecff';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(this.px, this.py, 22 + Math.sin(performance.now() / 90) * 2, 0, TAU);
+      ctx.arc(this.px, this.py, 21 + Math.sin(performance.now() / 100) * 1.5, 0, TAU);
       ctx.stroke();
       ctx.restore();
     }
@@ -2551,50 +2779,67 @@ export class GameEngine {
       ctx.restore();
     }
     const dim = e.spawnT > 0 ? 0.45 : 1;
-    // baked glow sprite (was: alpha disc + shadowBlur on every stroke)
+    // calm glow — elites whisper gold, normals barely breathe
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    drawGlow(ctx, color, e.x, e.y, e.r + 14, (e.elite ? 0.85 : 0.6) * dim);
+    drawGlow(ctx, color, e.x, e.y, e.r + 12, (e.elite ? 0.5 : 0.32) * dim);
     ctx.restore();
     ctx.save();
     ctx.globalAlpha = dim;
     ctx.translate(e.x, e.y);
     const face = angleTo(e.x, e.y, this.px, this.py);
     ctx.rotate(e.kind === 'shooter' || e.kind === 'boss' || e.kind === 'sniper' || e.kind === 'lancer' ? face : face + e.t * 0.6);
+    // hit squash — the hull pops on impact, then settles (flash decays 5/s)
+    const squash = 1 + Math.min(0.16, e.flash * 0.16);
+    ctx.scale(squash, squash);
 
-    const flash = e.flash > 0.3;
-    const body = flash ? '#ffffff' : color;
+    const flashing = e.flash > 0.25;
+    const enraged = e.kind === 'boss' && e.hp < e.maxHp * 0.32;
+    const body = flashing ? '#ffffff' : enraged ? '#ff8a4c' : color;
 
-    // elite outer ring (rotates opposite)
+    // elite ring — thin, slow
     if (e.elite) {
       ctx.save();
-      ctx.rotate(-e.t * 1.8);
-      ctx.strokeStyle = '#ffd319';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([10, 7]);
+      ctx.rotate(-e.t * 1.2);
+      ctx.strokeStyle = e.affix === 'bulwark' ? '#e8b26b' : e.affix === 'echo' ? '#a8ecff' : '#e8e0c8';
+      ctx.globalAlpha = 0.8;
+      ctx.lineWidth = e.affix === 'bulwark' ? 2.5 : 1.5;
+      ctx.setLineDash(e.affix === 'bulwark' ? [] : [8, 7]);
       ctx.beginPath();
-      ctx.arc(0, 0, e.r + 5, 0, TAU);
+      ctx.arc(0, 0, e.r + 4, 0, TAU);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
     }
 
-    // volatile affix warning: pulsing danger radius
-    if (e.affix === 'volatile' && e.spawnT <= 0) {
+    // frost tint — frozen enemies shimmer icy blue
+    if (this.frostT > 0 && e.spawnT <= 0) {
       ctx.save();
-      ctx.globalAlpha = 0.3 + 0.25 * Math.sin(e.t * 6);
-      ctx.strokeStyle = '#ff7a2a';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([12, 10]);
+      ctx.globalAlpha = 0.4;
+      ctx.strokeStyle = '#a8d8f0';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(0, 0, 120, 0, TAU);
+      ctx.arc(0, 0, e.r + 2, 0, TAU);
       ctx.stroke();
       ctx.restore();
     }
 
-    ctx.fillStyle = '#0a0a1c';
+    // volatile affix warning — smaller, calmer
+    if (e.affix === 'volatile' && e.spawnT <= 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.22 + 0.12 * Math.sin(e.t * 5);
+      ctx.strokeStyle = '#e89a6b';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([10, 10]);
+      ctx.beginPath();
+      ctx.arc(0, 0, 90, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.fillStyle = '#0a0d20';
     ctx.strokeStyle = body;
-    ctx.lineWidth = e.kind === 'boss' ? 4 : 2.5;
+    ctx.lineWidth = e.kind === 'boss' ? 3 : 2;
 
     ctx.beginPath();
     if (e.kind === 'chaser') {
@@ -2681,7 +2926,94 @@ export class GameEngine {
     ctx.fill();
     ctx.stroke();
 
-    // hive honeycomb inner detail (slow-rotating inner hex)
+    // per-kind identity details (local space, facing +x) — cheap strokes only
+    ctx.lineWidth = 1.2;
+    if (e.kind === 'chaser') {
+      ctx.fillStyle = flashing ? '#ffffff' : '#ffd7e4';
+      ctx.beginPath();
+      ctx.arc(e.r * 0.3, 0, Math.max(1.6, e.r * 0.13), 0, TAU);
+      ctx.fill();
+    } else if (e.kind === 'weaver') {
+      ctx.strokeStyle = body;
+      ctx.globalAlpha = 0.7 * dim;
+      ctx.beginPath();
+      ctx.moveTo(-e.r * 0.2, 0);
+      ctx.lineTo(-e.r * 0.9, e.r * 0.5);
+      ctx.moveTo(-e.r * 0.2, 0);
+      ctx.lineTo(-e.r * 0.9, -e.r * 0.5);
+      ctx.stroke();
+      ctx.globalAlpha = dim;
+    } else if (e.kind === 'dasher' && e.state === 1) {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(2, e.r * 0.2), 0, TAU);
+      ctx.fill();
+    } else if (e.kind === 'shooter') {
+      ctx.fillStyle = body;
+      ctx.fillRect(e.r * 0.4, -3, e.r * 0.55, 6);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(e.r * 0.9, 0, 2, 0, TAU);
+      ctx.fill();
+    } else if (e.kind === 'sniper') {
+      ctx.strokeStyle = body;
+      ctx.beginPath();
+      ctx.moveTo(e.r * 0.4, 0);
+      ctx.lineTo(e.r + 12, 0);
+      ctx.stroke();
+      ctx.globalAlpha = 0.8 * dim;
+      ctx.beginPath();
+      ctx.arc(0, 0, e.r * 0.42, 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = dim;
+    } else if (e.kind === 'lancer') {
+      ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+      ctx.beginPath();
+      ctx.moveTo(e.r + 6, 0);
+      ctx.lineTo(-e.r * 0.4, e.r * 0.42);
+      ctx.stroke();
+    } else if (e.kind === 'tank') {
+      ctx.strokeStyle = body;
+      ctx.globalAlpha = 0.65 * dim;
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * TAU + Math.PI / 8;
+        const px = Math.cos(a) * e.r * 0.62;
+        const py = Math.sin(a) * e.r * 0.62;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.globalAlpha = dim;
+    } else if (e.kind === 'splitter') {
+      ctx.strokeStyle = body;
+      ctx.globalAlpha = 0.55 * dim;
+      ctx.beginPath();
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * TAU + 0.5;
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(a) * e.r * 0.9, Math.sin(a) * e.r * 0.9);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = dim;
+    } else if (e.kind === 'boss') {
+      // rotating tick ring + breathing heart
+      ctx.save();
+      ctx.rotate(e.t * 0.8);
+      ctx.strokeStyle = enraged ? '#ffc46b' : body;
+      ctx.globalAlpha = 0.75 * dim;
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * TAU;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * (e.r + 7), Math.sin(a) * (e.r + 7));
+        ctx.lineTo(Math.cos(a) * (e.r + 12), Math.sin(a) * (e.r + 12));
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // hive honeycomb inner detail (slow-rotating inner hex + breathing core)
     if (e.kind === 'hive') {
       ctx.strokeStyle = body;
       ctx.lineWidth = 1.5;
@@ -2695,61 +3027,71 @@ export class GameEngine {
       }
       ctx.closePath();
       ctx.stroke();
+      ctx.fillStyle = body;
+      ctx.beginPath();
+      ctx.arc(0, 0, e.r * 0.16 + Math.sin(e.t * 3) * 1.6, 0, TAU);
+      ctx.fill();
     }
 
-    // core
+    // core — small, quiet (boss heart beats when enraged)
     ctx.fillStyle = body;
     ctx.beginPath();
-    ctx.arc(0, 0, Math.max(2.5, e.r * 0.22), 0, TAU);
+    const coreR =
+      e.kind === 'boss' && enraged
+        ? Math.max(3, e.r * 0.2 + Math.sin(e.t * 7) * 2.2)
+        : Math.max(2, e.r * 0.18);
+    ctx.arc(0, 0, coreR, 0, TAU);
     ctx.fill();
     ctx.restore();
 
-    // hp bar for tanky enemies
+    // hp bar — hairline
     if ((e.kind === 'splitter' || e.kind === 'shooter' || e.kind === 'dasher' || e.kind === 'boss' || e.kind === 'tank' || e.kind === 'sniper' || e.kind === 'lancer' || e.kind === 'hive' || e.elite) && e.hp < e.maxHp) {
-      const w = e.kind === 'boss' ? 110 : e.kind === 'tank' || e.kind === 'hive' ? 56 : 34;
+      const w = e.kind === 'boss' ? 96 : e.kind === 'tank' || e.kind === 'hive' ? 48 : 30;
       const frac = clamp(e.hp / e.maxHp, 0, 1);
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(e.x - w / 2, e.y - e.r - 12, w, 5);
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(e.x - w / 2, e.y - e.r - 10, w, 3.5);
       ctx.fillStyle = color;
-      ctx.fillRect(e.x - w / 2, e.y - e.r - 12, w * frac, 5);
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(e.x - w / 2, e.y - e.r - 10, w * frac, 3.5);
+      ctx.globalAlpha = 1;
     }
 
-    // dasher telegraph line
+    // telegraphs — thin, calm
     if (e.kind === 'dasher' && e.state === 1) {
       ctx.save();
-      ctx.globalAlpha = 0.35 + Math.sin(e.t * 30) * 0.15;
-      ctx.strokeStyle = '#ffcf1c';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([8, 8]);
+      ctx.globalAlpha = 0.3 + Math.sin(e.t * 24) * 0.1;
+      ctx.strokeStyle = '#d8cfae';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([7, 8]);
       ctx.beginPath();
       ctx.moveTo(e.x, e.y);
-      ctx.lineTo(e.x + e.lockDx * 300, e.y + e.lockDy * 300);
+      ctx.lineTo(e.x + e.lockDx * 280, e.y + e.lockDy * 280);
       ctx.stroke();
       ctx.restore();
     }
     // sniper laser telegraph
     if (e.kind === 'sniper' && e.state === 1) {
       ctx.save();
-      ctx.globalAlpha = 0.5 + Math.sin(e.t * 40) * 0.2;
-      ctx.strokeStyle = '#ff5df2';
-      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.4 + Math.sin(e.t * 30) * 0.12;
+      ctx.strokeStyle = '#d8a8e8';
+      ctx.lineWidth = 1;
       ctx.setLineDash([4, 6]);
       ctx.beginPath();
       ctx.moveTo(e.x, e.y);
-      ctx.lineTo(e.x + e.lockDx * 700, e.y + e.lockDy * 700);
+      ctx.lineTo(e.x + e.lockDx * 640, e.y + e.lockDy * 640);
       ctx.stroke();
       ctx.restore();
     }
     // lancer lance telegraph
     if (e.kind === 'lancer' && e.state === 1) {
       ctx.save();
-      ctx.globalAlpha = 0.45 + Math.sin(e.t * 34) * 0.18;
-      ctx.strokeStyle = '#2dd4bf';
-      ctx.lineWidth = 2.5;
-      ctx.setLineDash([10, 6]);
+      ctx.globalAlpha = 0.38 + Math.sin(e.t * 28) * 0.12;
+      ctx.strokeStyle = '#9ad8cf';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([8, 7]);
       ctx.beginPath();
       ctx.moveTo(e.x, e.y);
-      ctx.lineTo(e.x + e.lockDx * 420, e.y + e.lockDy * 420);
+      ctx.lineTo(e.x + e.lockDx * 380, e.y + e.lockDy * 380);
       ctx.stroke();
       ctx.restore();
     }
@@ -2765,7 +3107,7 @@ export class GameEngine {
     let drawn = 0;
     const nowMs = performance.now();
     for (const e of this.enemies) {
-      if (drawn >= 8 || e.hp <= 0 || e.spawnT > 0) continue;
+      if (drawn >= 6 || e.hp <= 0 || e.spawnT > 0) continue;
       const threat =
         e.kind === 'boss' ? 3 : e.elite ? 2 : e.kind === 'shooter' || e.kind === 'sniper' ? 1 : 0;
       if (threat === 0) continue;
@@ -2774,20 +3116,23 @@ export class GameEngine {
       const cx = clamp(e.x, x0, x1);
       const cy = clamp(e.y, y0, y1);
       const a = Math.atan2(e.y - this.py, e.x - this.px);
-      const col = e.kind === 'boss' ? '#ff2244' : e.elite ? '#ffd319' : ENEMY_COLOR[e.kind];
-      const pulse = 0.6 + 0.4 * Math.sin(nowMs / 220);
+      const col = e.kind === 'boss' ? '#e8949f' : e.elite ? '#e8e0c8' : ENEMY_COLOR[e.kind];
+      const pulse = 0.5 + 0.22 * Math.sin(nowMs / 300);
       ctx.save();
       // NOTE: indicator coords are world-space; convert to screen space
       ctx.translate(cx - camX, cy - camY);
       ctx.rotate(a);
       ctx.globalAlpha = pulse;
-      ctx.fillStyle = col;
-      const s = threat === 3 ? 13 : threat === 2 ? 10 : 8;
+      const s = threat === 3 ? 10 : threat === 2 ? 8 : 6;
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
       ctx.beginPath();
       ctx.moveTo(s, 0);
       ctx.lineTo(-s * 0.6, s * 0.7);
       ctx.lineTo(-s * 0.6, -s * 0.7);
       ctx.closePath();
+      ctx.stroke();
+      ctx.fillStyle = col;
       ctx.fill();
       ctx.restore();
       drawn++;
@@ -2798,19 +3143,19 @@ export class GameEngine {
     const draw = (s: Stick, label: string) => {
       if (!s.active) return;
       ctx.save();
-      ctx.globalAlpha = 0.5;
-      ctx.strokeStyle = '#00f0ff';
-      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = '#aab3cc';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(s.ox, s.oy, 52, 0, TAU);
       ctx.stroke();
-      ctx.globalAlpha = 0.8;
-      ctx.fillStyle = '#00f0ff';
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = '#d9e2f5';
       ctx.beginPath();
-      ctx.arc(s.ox + s.dx * 0.6, s.oy + s.dy * 0.6, 22, 0, TAU);
+      ctx.arc(s.ox + s.dx * 0.6, s.oy + s.dy * 0.6, 20, 0, TAU);
       ctx.fill();
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = '#fff';
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = '#8b93b0';
       ctx.font = '11px Vazirmatn, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(label, s.ox, s.oy - 60);

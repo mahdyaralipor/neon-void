@@ -33,6 +33,8 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showLab, setShowLab] = useState(false);
   const [runId, setRunId] = useState(0);
+  const [takenStacks, setTakenStacks] = useState<Record<string, number>>({});
+  const [rerollsLeft, setRerollsLeft] = useState(1);
   const engineRef = useRef<GameEngine | null>(null);
   const phaseRef = useRef(phase);
   useEffect(() => {
@@ -61,6 +63,8 @@ export default function App() {
     setResult(null);
     setHud(null);
     setChoices([]);
+    setTakenStacks({});
+    setRerollsLeft(1);
     setPhase('playing');
     setScreen('game');
     setRunId((v) => v + 1);
@@ -83,6 +87,15 @@ export default function App() {
   const onHud = useCallback((h: HudSnapshot) => setHud(h), []);
   const onLevelUp = useCallback((c: UpgradeDef[]) => {
     setChoices(c);
+    const eng = engineRef.current;
+    if (eng) {
+      try {
+        setTakenStacks(eng.getTakenStacks());
+        setRerollsLeft(eng.getRerollsLeft());
+      } catch {
+        /* ignore */
+      }
+    }
     setPhase('upgrade');
   }, []);
   const onGameOver = useCallback((r: GameResult) => {
@@ -106,23 +119,67 @@ export default function App() {
     const eng = engineRef.current;
     if (!eng) return;
     eng.applyUpgrade(id);
+    try {
+      setTakenStacks(eng.getTakenStacks());
+      setRerollsLeft(eng.getRerollsLeft());
+    } catch {
+      /* ignore */
+    }
     // engine fires onLevelUp synchronously if another level is queued
     // (upgradeLock stays true) — only return to playing when fully unlocked.
     if (!eng.pendingUpgrade) setPhase('playing');
   }, []);
 
-  // number keys for upgrades
+  const rerollUpgrades = useCallback(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    const res = eng.rerollUpgrades();
+    if (res) {
+      try {
+        setRerollsLeft(eng.getRerollsLeft());
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
+  const skipUpgrade = useCallback(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    eng.skipUpgrade();
+    try {
+      setTakenStacks(eng.getTakenStacks());
+      setRerollsLeft(eng.getRerollsLeft());
+    } catch {
+      /* ignore */
+    }
+    if (!eng.pendingUpgrade) setPhase('playing');
+  }, []);
+
+  // number keys for upgrades (1/2/3 pick, 0 skip)
   useEffect(() => {
     if (phase !== 'upgrade') return;
     const fn = (e: KeyboardEvent) => {
       const idx = ['1', '2', '3'].indexOf(e.key);
       if (idx >= 0 && choices[idx]) pickUpgrade(choices[idx].id);
+      else if (e.key === '0') skipUpgrade();
     };
     window.addEventListener('keydown', fn);
     return () => window.removeEventListener('keydown', fn);
-  }, [phase, choices, pickUpgrade]);
+  }, [phase, choices, pickUpgrade, skipUpgrade]);
 
   const pausedForEngine = phase === 'paused' || phase === 'upgrade';
+
+  // sync build snapshot whenever the player opens pause (cheap, on-demand)
+  useEffect(() => {
+    if (phase === 'paused' && engineRef.current) {
+      try {
+        setTakenStacks(engineRef.current.getTakenStacks());
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [phase]);
 
   return (
     <div className="h-full min-h-screen bg-[#050514] text-slate-100" dir="rtl">
@@ -189,18 +246,39 @@ export default function App() {
 
           {/* bottom-left hint */}
           {phase === 'playing' && (
-            <div className="pointer-events-none absolute bottom-3 left-3 z-20 hidden text-[11px] text-slate-500 md:block" dir="ltr">
-              WASD move · mouse aim · SHIFT dash · P pause
+            <div className="font-display pointer-events-none absolute bottom-3 left-3 z-20 hidden text-[10px] tracking-[0.14em] text-slate-600 md:block" dir="ltr">
+              WASD MOVE · MOUSE AIM · SHIFT DASH · P PAUSE
+            </div>
+          )}
+
+          {/* first-run coach — three quiet hints, gone after 12s */}
+          {phase === 'playing' && totals.runs === 0 && hud && hud.time < 12 && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-8 z-20 flex justify-center px-4">
+              <div className="anim-rise flex flex-wrap items-center justify-center gap-1.5">
+                <span className="chip !bg-black/60 !text-[11px] backdrop-blur-md">حرکت با WASD</span>
+                <span className="chip !bg-black/60 !text-[11px] backdrop-blur-md">شلیک خودکار است — فقط aim بگیر</span>
+                <span className="chip !bg-black/60 !text-[11px] backdrop-blur-md">Shift دش می‌زند</span>
+              </div>
             </div>
           )}
 
           {phase === 'upgrade' && choices.length > 0 && (
-            <UpgradeModal choices={choices} level={hud?.level ?? 1} onPick={pickUpgrade} />
+            <UpgradeModal
+              choices={choices}
+              level={hud?.level ?? 1}
+              taken={takenStacks}
+              rerollsLeft={rerollsLeft}
+              onPick={pickUpgrade}
+              onReroll={rerollUpgrades}
+              onSkip={skipUpgrade}
+            />
           )}
 
           {phase === 'paused' && (
             <PauseMenu
               muted={settings.muted}
+              hud={hud}
+              taken={takenStacks}
               onResume={() => setPhase('playing')}
               onRestart={startGame}
               onMenu={goMenu}

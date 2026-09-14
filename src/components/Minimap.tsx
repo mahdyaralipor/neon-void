@@ -44,28 +44,29 @@ export default function Minimap({ dots, px, py }: Props) {
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = 'rgba(5,5,20,0.85)';
-    ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = 'rgba(0,240,255,0.35)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
+    ctx.fillStyle = 'rgba(8,10,24,0.82)';
+    ctx.beginPath();
+    ctx.roundRect(0, 0, W, H, 10);
+    ctx.fill();
     const sx = W / WORLD_W;
     const sy = H / WORLD_H;
     for (const dot of dots) {
-      ctx.fillStyle = dot.elite ? '#ffd319' : (DOT_COLOR[dot.kind] ?? '#fff');
-      const r = dot.kind === 'boss' ? 3.4 : dot.elite ? 2.8 : dot.kind === 'powerup' ? 2.6 : 1.6;
+      ctx.fillStyle = dot.elite ? '#e8e4d8' : (DOT_COLOR[dot.kind] ?? '#fff');
+      ctx.globalAlpha = dot.kind === 'gem' ? 0.55 : 0.9;
+      const r = dot.kind === 'boss' ? 3 : dot.elite ? 2.4 : dot.kind === 'powerup' ? 2.2 : 1.4;
       ctx.beginPath();
       ctx.arc(dot.x * sx, dot.y * sy, r, 0, Math.PI * 2);
       ctx.fill();
     }
-    // player dot (plain, no per-frame shadowBlur)
-    ctx.fillStyle = '#00f0ff';
+    ctx.globalAlpha = 1;
+    // player dot — soft white core
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
     ctx.beginPath();
-    ctx.arc(px * sx, py * sy, 3, 0, Math.PI * 2);
+    ctx.arc(px * sx, py * sy, 2.4, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = 'rgba(0,240,255,0.25)';
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
     ctx.beginPath();
-    ctx.arc(px * sx, py * sy, 5.5, 0, Math.PI * 2);
+    ctx.arc(px * sx, py * sy, 5, 0, Math.PI * 2);
     ctx.fill();
   }, [dots, px, py]);
 
@@ -73,7 +74,7 @@ export default function Minimap({ dots, px, py }: Props) {
     <canvas
       ref={ref}
       style={{ width: W, height: H }}
-      className="rounded-xl border border-cyan-400/20"
+      className="rounded-xl border border-white/10 opacity-90"
       aria-label="minimap"
     />
   );

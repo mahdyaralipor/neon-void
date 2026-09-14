@@ -189,6 +189,8 @@ export interface EngineOptions {
   meta: MetaLevels;
   /** global game-speed multiplier (0.9 calm / 1 standard / 1.25 turbo) */
   speed: number;
+  /** show floating damage numbers (off = only crits/big hits) */
+  showDamageNumbers?: boolean;
 }
 
 export interface MinimapDot {
@@ -233,8 +235,11 @@ export interface HudSnapshot {
   fireRate: number;
   moveSpeed: number;
   critChance: number;
+  critMult: number;
+  multishot: number;
   intermission: number; // >0 means break between waves
   waveProgress: number; // 0..1
+  waveLeft: number; // kills remaining to clear the wave
   announce: string | null;
   powerups: PowerUpState[];
   orbitals: number;
@@ -261,6 +266,8 @@ export interface GameResult {
   ship: ShipId;
   shards: number;
   powerups: number;
+  victory: boolean;
+  deathBy: string | null;
 }
 
 export interface EngineCallbacks {

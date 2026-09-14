@@ -1,7 +1,9 @@
-import { Home, RotateCcw, Swords, Timer, Trophy, Layers, Flame, Crown, Medal, Gem, Zap } from 'lucide-react';
+import { useState } from 'react';
+import { Home, RotateCcw, Trophy, Share2, Check } from 'lucide-react';
 import type { GameResult, Grade } from '../game/types';
 import type { BoardEntry } from '../game/storage';
 import { formatScore, formatTime } from '../game/utils';
+import { UPGRADE_MAP } from '../game/upgrades';
 
 interface Props {
   result: GameResult;
@@ -11,98 +13,132 @@ interface Props {
   onMenu: () => void;
 }
 
-const GRADE_STYLE: Record<Grade, { bg: string; fa: string }> = {
-  S: { bg: 'from-yellow-300 to-amber-500 shadow-[0_0_50px_rgba(255,211,25,0.6)]', fa: 'افسانه‌ای!' },
-  A: { bg: 'from-violet-400 to-purple-600 shadow-[0_0_40px_rgba(177,75,255,0.5)]', fa: 'فوق‌العاده!' },
-  B: { bg: 'from-cyan-400 to-sky-600 shadow-[0_0_40px_rgba(0,240,255,0.4)]', fa: 'خوب!' },
-  C: { bg: 'from-emerald-400 to-green-600 shadow-[0_0_30px_rgba(61,255,142,0.35)]', fa: 'قابل قبول' },
-  D: { bg: 'from-slate-400 to-slate-600 shadow-[0_0_20px_rgba(148,163,184,0.3)]', fa: 'تلاش بیشتر!' },
+const GRADE_TILE: Record<Grade, string> = {
+  S: 'from-amber-200 to-yellow-400 text-amber-950',
+  A: 'from-violet-300 to-purple-400 text-purple-950',
+  B: 'from-cyan-200 to-sky-300 text-sky-950',
+  C: 'from-emerald-200 to-green-300 text-emerald-950',
+  D: 'from-slate-300 to-slate-400 text-slate-900',
+};
+
+const GRADE_FA: Record<Grade, string> = {
+  S: 'افسانه‌ای',
+  A: 'فوق‌العاده',
+  B: 'تمیز بازی کردی',
+  C: 'قابل قبول',
+  D: 'دفعه بعد بهتر',
 };
 
 export default function GameOver({ result, best, board, onRetry, onMenu }: Props) {
-  const g = GRADE_STYLE[result.grade];
+  const victory = result.victory;
+  const [copied, setCopied] = useState(false);
+  const share = async () => {
+    const txt = victory
+      ? `NEON VOID 🏆 پیروزی در موج ۲۰ — ${formatScore(result.score)} امتیاز · ${result.kills} کیل · ${formatTime(result.time)}`
+      : `NEON VOID — ${formatScore(result.score)} امتیاز · موج ${result.wave} · ${result.kills} کیل · گرید ${result.grade} · ${formatTime(result.time)}`;
+    try {
+      await navigator.clipboard.writeText(txt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+  const buildNames = result.upgradesTaken.slice(0, 8).map((id) => UPGRADE_MAP[id]?.nameFa ?? id);
+  const stats: [string, string][] = [
+    ['کیل', String(result.kills)],
+    ['الیت', String(result.elites)],
+    ['موج', String(result.wave)],
+    ['زمان', formatTime(result.time)],
+    ['کمبو', `×${result.maxCombo}`],
+    ['لول', String(result.level)],
+  ];
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
-      <div className="glass anim-rise my-auto w-full max-w-md rounded-3xl p-7 text-center">
-        <div className="flex items-start justify-center gap-3">
-          <div className={`inline-flex rounded-2xl bg-gradient-to-br p-4 text-slate-950 ${g.bg}`}>
+    <div className="absolute inset-0 z-30 flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-md">
+      <div className="glass anim-rise my-auto w-full max-w-md rounded-3xl p-6 text-center sm:p-7">
+        <div className="flex items-center justify-center gap-4">
+          <div className={`anim-grade inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br ${GRADE_TILE[result.grade]}`}>
             <span className="font-display text-4xl font-black" dir="ltr">{result.grade}</span>
           </div>
-          <div className="pt-1 text-right">
-            <h2 className="text-2xl font-black text-white">تو در خلأ حل شدی</h2>
-            <p className="text-xs font-bold text-slate-400">{g.fa}</p>
+          <div className="text-right">
+            <div className="eyebrow" dir="ltr">{victory ? 'VICTORY' : 'RUN OVER'}</div>
+            <h2 className="mt-1 text-xl font-extrabold tracking-tight text-white">
+              {victory ? 'خلأ رام شد!' : 'سفرت تمام شد'}
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {victory ? 'پیروزی در موج ۲۰ · ‎+۱۰ ◇' : result.deathBy ? `قاتل: ${result.deathBy}` : GRADE_FA[result.grade]}
+            </p>
           </div>
         </div>
 
         {result.isBest && (
-          <div className="mx-auto mt-4 inline-flex items-center gap-2 rounded-full border border-yellow-300/40 bg-yellow-400/15 px-4 py-1.5 text-sm font-bold text-yellow-200">
-            <Trophy size={15} /> رکورد جدید!
+          <div className="chip mx-auto mt-4 w-fit !border-amber-200/25 !bg-amber-200/[0.08] !text-amber-100">
+            <Trophy size={13} /> رکورد جدید
           </div>
         )}
 
-        <div className="font-display mt-4 text-5xl font-black text-white" dir="ltr">
+        <div className="font-display tabular mt-4 text-[42px] font-bold leading-none tracking-tight text-white" dir="ltr">
           {formatScore(result.score)}
         </div>
-        <div className="mt-1 text-[11px] text-slate-400">امتیاز نهایی · بهترین: {best.toLocaleString('en-US')}</div>
+        <div className="tabular mt-1.5 text-[11px] text-slate-500" dir="ltr">
+          BEST {best.toLocaleString('en-US')} · +{result.shards} ◇ · {result.powerups} POWERUPS
+        </div>
 
-        <div className="mt-5 grid grid-cols-3 gap-2 text-right">
-          <Stat icon={<Swords size={14} />} label="کیل‌ها" value={String(result.kills)} />
-          <Stat icon={<Crown size={14} />} label="الیت" value={String(result.elites)} />
-          <Stat icon={<Layers size={14} />} label="موج" value={String(result.wave)} />
-          <Stat icon={<Timer size={14} />} label="زمان" value={formatTime(result.time)} />
-          <Stat icon={<Flame size={14} />} label="کمبو" value={`x${result.maxCombo}`} />
-          <Stat icon={<Medal size={14} />} label="لول" value={String(result.level)} />
-          <Stat icon={<Gem size={14} />} label="خرده خلأ" value={`+${result.shards}`} />
-          <Stat icon={<Zap size={14} />} label="پاورآپ" value={String(result.powerups)} />
+        <div className="tabular mt-5 grid grid-cols-3 gap-1.5">
+          {stats.map(([label, value]) => (
+            <div key={label} className="rounded-xl bg-white/[0.035] px-2 py-2.5">
+              <div className="font-display text-[14px] font-bold text-white" dir="ltr">{value}</div>
+              <div className="mt-0.5 text-[10.5px] text-slate-500">{label}</div>
+            </div>
+          ))}
         </div>
 
         {board.length > 0 && (
-          <div className="mt-4 rounded-xl bg-white/[0.03] p-3 text-right">
-            <div className="mb-1.5 text-[11px] font-black text-yellow-200">تابلوی افتخار</div>
+          <div className="mt-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3 text-right">
+            <div className="eyebrow mb-1.5" dir="ltr">TOP RUNS</div>
             {board.slice(0, 3).map((b, i) => (
-              <div key={`${b.date}-${i}`} className="flex justify-between py-0.5 text-[11px] text-slate-400">
+              <div key={`${b.date}-${i}`} className="tabular flex justify-between py-1 text-[11.5px]">
                 <span className="font-display font-bold text-slate-200" dir="ltr">
-                  #{i + 1} {b.score.toLocaleString('en-US')}
+                  <span className={i === 0 ? 'text-amber-200/90' : 'text-slate-600'}>#{i + 1}</span>{' '}
+                  {b.score.toLocaleString('en-US')}
                 </span>
-                <span>موج {b.wave} · {formatTime(b.time)}</span>
+                <span className="text-slate-500">موج {b.wave} · {formatTime(b.time)}</span>
               </div>
             ))}
           </div>
         )}
 
-        {result.upgradesTaken.length > 0 && (
-          <p className="mt-3 text-[11px] leading-5 text-slate-500">
-            بیلد: {result.upgradesTaken.slice(0, 8).join(' · ')}
-          </p>
+        {buildNames.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap justify-center gap-1.5">
+            {buildNames.map((n) => (
+              <span key={n} className="rounded-lg bg-white/[0.05] px-2 py-1 text-[10.5px] font-bold text-slate-400">
+                {n}
+              </span>
+            ))}
+          </div>
         )}
 
         <div className="mt-5 flex gap-2">
           <button
             onClick={onRetry}
-            className="btn-neon flex-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-l from-cyan-400 to-sky-500 px-5 py-3 text-sm font-black text-slate-950"
+            className="btn-neon btn-primary flex-1 inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black"
           >
-            <RotateCcw size={17} /> تلاش دوباره
+            <RotateCcw size={16} /> تلاش دوباره
+          </button>
+          <button
+            onClick={share}
+            className="btn-neon btn-ghost inline-flex items-center justify-center rounded-2xl px-4 py-3"
+            aria-label="share"
+          >
+            {copied ? <Check size={16} className="text-emerald-300" /> : <Share2 size={16} className="text-slate-400" />}
           </button>
           <button
             onClick={onMenu}
-            className="btn-neon inline-flex items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-bold text-white"
+            className="btn-neon btn-ghost inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-[13px] font-bold"
           >
-            <Home size={17} /> منو
+            <Home size={15} className="text-slate-400" /> منو
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="rounded-xl bg-white/[0.04] px-3 py-2.5">
-      <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-        {icon} {label}
-      </div>
-      <div className="font-display mt-0.5 text-base font-bold text-white" dir="ltr">
-        {value}
       </div>
     </div>
   );
