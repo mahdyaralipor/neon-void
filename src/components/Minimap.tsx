@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
-import type { MinimapDot } from '../game/types';
+import type { EnemyKind, MinimapDot } from '../game/types';
 import { WORLD_W, WORLD_H } from '../game/engine';
+import { isBossKind } from '../game/enemies';
 
 interface Props {
   dots: MinimapDot[];
@@ -21,9 +22,13 @@ const DOT_COLOR: Record<string, string> = {
   stinger: '#5df2ff',
   bomber: '#f43f5e',
   tesla: '#93c5fd',
+  mortar: '#cbd5e1',
+  mender: '#bef264',
+  mirage: '#a5f3fc',
   boss: '#ff2244',
   juggernaut: '#ff5d00',
   tempest: '#d8b4fe',
+  voidborn: '#ddd6fe',
   gem: '#a3ff12',
   powerup: '#ffffff',
   player: '#00f0ff',
@@ -57,7 +62,7 @@ export default function Minimap({ dots, players }: Props) {
     for (const dot of dots) {
       ctx.fillStyle = dot.elite ? '#e8e4d8' : (DOT_COLOR[dot.kind] ?? '#fff');
       ctx.globalAlpha = dot.kind === 'gem' ? 0.55 : 0.9;
-      const r = dot.kind === 'boss' ? 3 : dot.elite ? 2.4 : dot.kind === 'powerup' ? 2.2 : 1.4;
+      const r = isBossKind(dot.kind as EnemyKind) ? 3 : dot.elite ? 2.4 : dot.kind === 'powerup' ? 2.2 : 1.4;
       ctx.beginPath();
       ctx.arc(dot.x * sx, dot.y * sy, r, 0, Math.PI * 2);
       ctx.fill();

@@ -3,20 +3,22 @@ import {
   Star, Rocket, Ghost, Anchor, Medal, Swords, Timer, Layers,
   Droplet, Sparkles, Crown, Skull, Orbit, Award, Crosshair,
   FlaskConical, Gem, Hexagon, Snowflake, HeartPulse, BookOpen,
-  History, Infinity as InfinityIcon, Compass,
+  History, Infinity as InfinityIcon, Compass, Radiation,
 } from 'lucide-react';
 import { SHIPS, type ShipDef, type ShipId } from '../game/types';
 import { getRuns, type BoardEntry, type SavedSettings, type Totals } from '../game/storage';
 import type { MetaLevels } from '../game/types';
 import { ACHIEVEMENTS, getUnlockedAchievements } from '../game/achievements';
-import { ENEMY_COLOR, ENEMY_FA, ENEMY_LORE, BOSS_KINDS } from '../game/enemies';
+import { ENEMY_COLOR, ENEMY_FA, ENEMY_LORE, isBossKind } from '../game/enemies';
 import { UPGRADE_POOL } from '../game/upgrades';
 import { MUTATORS } from '../game/types';
 import pkg from '../../package.json';
 import type { EnemyKind } from '../game/types';
 import { formatTime } from '../game/utils';
 import MenuBackdrop from './MenuBackdrop';
-import { useMemo } from 'react';
+import EnemyIcon from './EnemyIcon';
+import EnemyDetailModal from './EnemyDetailModal';
+import { useMemo, useState } from 'react';
 
 const ACH_ICON: Record<string, typeof Shield> = {
   droplet: Droplet,
@@ -33,6 +35,7 @@ const ACH_ICON: Record<string, typeof Shield> = {
   heartpulse: HeartPulse,
   gem: Gem,
   ghost: Ghost,
+  void: Radiation,
 };
 
 interface Props {
@@ -94,6 +97,9 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
   const runs = useMemo(() => getRuns(), []);
   const metaTotal = meta.dmg + meta.hp + meta.speed + meta.xp;
   const codexKinds = useMemo(() => Object.keys(ENEMY_COLOR) as EnemyKind[], []);
+  const codexRegulars = useMemo(() => codexKinds.filter((k) => !isBossKind(k)), [codexKinds]);
+  const codexBosses = useMemo(() => codexKinds.filter((k) => isBossKind(k)), [codexKinds]);
+  const [selectedKind, setSelectedKind] = useState<EnemyKind | null>(null);
   // co-op needs a physical keyboard — P2 flies with arrows + Enter
   const coarsePointer = useMemo(() => {
     try {
@@ -383,30 +389,54 @@ export default function MainMenu({ best, board, totals, settings, shards, meta, 
             </div>
             <span className="eyebrow" dir="ltr">CODEX · {codexKinds.length}</span>
           </div>
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-            {codexKinds.map((k) => (
-              <div
+          <div className="mb-1.5 text-[10px] font-bold text-slate-500">دشمنان — برای جزئیات کلیک کن</div>
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+            {codexRegulars.map((k) => (
+              <button
                 key={k}
-                title={ENEMY_LORE[k]}
-                className="flex items-center gap-2.5 rounded-xl bg-white/[0.02] px-3 py-2.5 text-right transition hover:bg-white/[0.05]"
+                onClick={() => setSelectedKind(k)}
+                title={`${ENEMY_FA[k]} — کلیک برای جزئیات`}
+                className="btn-neon group flex items-center gap-2.5 rounded-xl bg-white/[0.02] px-2.5 py-2 text-right transition hover:bg-white/[0.06]"
               >
-                <span
-                  className="h-3 w-3 shrink-0 rounded-full"
-                  style={{ backgroundColor: ENEMY_COLOR[k], boxShadow: `0 0 12px ${ENEMY_COLOR[k]}` }}
-                />
-                <span>
-                  <span className="block text-[11.5px] font-extrabold text-slate-200">{ENEMY_FA[k]}</span>
-                  <span className="block text-[10px] leading-4 text-slate-500">{ENEMY_LORE[k]}</span>
+                <span className="shrink-0 transition-transform group-hover:scale-110">
+                  <EnemyIcon kind={k} size={38} />
                 </span>
-              </div>
+                <span className="min-w-0">
+                  <span className="block truncate text-[11.5px] font-extrabold text-slate-200">{ENEMY_FA[k]}</span>
+                  <span className="block truncate text-[10px] leading-4 text-slate-500">{ENEMY_LORE[k]}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="mb-1.5 mt-3 text-[10px] font-bold text-slate-500">باس‌ها — هر ۵ موج یه غول</div>
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+            {codexBosses.map((k) => (
+              <button
+                key={k}
+                onClick={() => setSelectedKind(k)}
+                title={`${ENEMY_FA[k]} — کلیک برای جزئیات`}
+                className="btn-neon group flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-right transition hover:bg-white/[0.06]"
+                style={{ backgroundColor: `${ENEMY_COLOR[k]}0d`, border: `1px solid ${ENEMY_COLOR[k]}30` }}
+              >
+                <span className="shrink-0 transition-transform group-hover:scale-110">
+                  <EnemyIcon kind={k} size={42} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[11.5px] font-extrabold text-slate-100">{ENEMY_FA[k]}</span>
+                  <span className="block truncate text-[10px] leading-4 text-slate-500">{ENEMY_LORE[k]}</span>
+                </span>
+              </button>
             ))}
           </div>
         </div>
+        {selectedKind && (
+          <EnemyDetailModal kind={selectedKind} onClose={() => setSelectedKind(null)} />
+        )}
 
         <div className="mt-4 grid grid-cols-1 gap-2.5 text-right sm:grid-cols-3">
           {[
             { icon: Gamepad2, tint: 'text-cyan-200 bg-cyan-300/10', title: 'حرکت و شلیک', body: 'WASD حرکت · موس aim · شلیک خودکار · هر لول یک ری‌رول' },
-            { icon: Skull, tint: 'text-rose-200 bg-rose-400/10', title: 'دشمن و باس', body: `${codexKinds.length} دشمن · ${BOSS_KINDS.length} باس · ${Object.keys(MUTATORS).length} موتاتور — هر ۵ موج یه غول` },
+            { icon: Skull, tint: 'text-rose-200 bg-rose-400/10', title: 'دشمن و باس', body: `${codexRegulars.length} دشمن · ${codexBosses.length} باس · ${Object.keys(MUTATORS).length} موتاتور — هر ۵ موج یه غول` },
             { icon: Star, tint: 'text-amber-200 bg-amber-300/10', title: 'پیشرفت', body: `${UPGRADE_POOL.length} ارتقا · ${ACHIEVEMENTS.length} اچیومنت · آزمایشگاه دائمی + بی‌پایان ♾️` },
           ].map((c) => (
             <div key={c.title} className="glass rounded-2xl p-4">

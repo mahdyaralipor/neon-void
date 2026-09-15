@@ -47,9 +47,13 @@ export const ENEMY_COLOR: Record<EnemyKind, string> = {
   stinger: '#5df2ff',
   bomber: '#f43f5e',
   tesla: '#93c5fd',
+  mortar: '#cbd5e1',
+  mender: '#bef264',
+  mirage: '#a5f3fc',
   boss: '#ff2244',
   juggernaut: '#ff5d00',
   tempest: '#d8b4fe',
+  voidborn: '#ddd6fe',
 };
 
 export const ENEMY_FA: Record<EnemyKind, string> = {
@@ -66,9 +70,13 @@ export const ENEMY_FA: Record<EnemyKind, string> = {
   stinger: 'نیش‌دار',
   bomber: 'بمب‌افکن',
   tesla: 'تسلا',
-  boss: 'باس',
+  mortar: 'خمپاره‌چی',
+  mender: 'ترمیم‌گر',
+  mirage: 'سراب',
+  boss: 'اورلرد',
   juggernaut: 'جاگرنات',
   tempest: 'تمپست',
+  voidborn: 'خلأزاد',
 };
 
 export const ENEMY_LORE: Record<EnemyKind, string> = {
@@ -85,9 +93,85 @@ export const ENEMY_LORE: Record<EnemyKind, string> = {
   stinger: 'جدید: ۳تیر پشت‌سرهم + سرعت بالا',
   bomber: 'سوت که کشید فرار کن — انفجار شعاعی',
   tesla: 'برجک برق — خط تلگراف = برق گرفتگی',
+  mortar: 'خمپاره می‌اندازد — از دایره تلگراف بیرون بپر',
+  mender: 'پزشک میدان — هم‌تیمی‌هاش را درمان می‌کند، اول او را بزن',
+  mirage: 'غیب می‌شود و پشت سرت ظاهر می‌شود — چشم ازش برندار',
   boss: 'اورلرد — اسپیرال و احضار',
   juggernaut: 'کند ولی ویرانگر — شارژ + موج آتش',
   tempest: 'سریع و دور — رگبار هدف‌دار + صاعقه',
+  voidborn: 'فینال موج ۲۰ — ترکیب هر سه باس + کوبش خلأ',
+};
+
+/** Codex role badge per kind. */
+export const ENEMY_ROLE: Record<EnemyKind, string> = {
+  chaser: 'مهاجم',
+  weaver: 'مهاجم',
+  dasher: 'کمین‌گر',
+  shooter: 'تیرانداز',
+  splitter: 'تولیدکننده',
+  mini: 'گله',
+  sniper: 'تک‌تیر',
+  tank: 'زرهی',
+  lancer: 'کمین‌گر',
+  hive: 'تولیدکننده',
+  stinger: 'مهاجم',
+  bomber: 'انتحاری',
+  tesla: 'تیرانداز',
+  mortar: 'توپخانه',
+  mender: 'پشتیبان',
+  mirage: 'کمین‌گر',
+  boss: 'باس',
+  juggernaut: 'باس',
+  tempest: 'باس',
+  voidborn: 'باس نهایی',
+};
+
+/** First wave the kind can appear in (bosses = their guard wave). */
+export const ENEMY_UNLOCK: Record<EnemyKind, number> = {
+  chaser: 1,
+  weaver: 2,
+  dasher: 3,
+  shooter: 4,
+  lancer: 4,
+  bomber: 4,
+  splitter: 5,
+  stinger: 5,
+  boss: 5,
+  sniper: 6,
+  hive: 6,
+  mortar: 6,
+  tank: 7,
+  tesla: 7,
+  mirage: 8,
+  mender: 9,
+  juggernaut: 10,
+  tempest: 15,
+  mini: 5,
+  voidborn: 20,
+};
+
+/** Combat tip shown in the codex detail view. */
+export const ENEMY_TIP: Record<EnemyKind, string> = {
+  chaser: 'کایتش کن و با فوکوس بزنش — ساده‌ترین غذای کمبو.',
+  weaver: 'حرکت مارپیچش aim را گول می‌زند؛ نزدیک که شد دش بزن.',
+  dasher: 'خط‌چین تلگراف را ببین و عمودی جاخالی بده.',
+  shooter: 'اول او را پاک کن وگرنه از دور اذیت می‌شوی.',
+  splitter: 'با فاصله بترکان تا مینی‌ها غافلگیرت نکنند.',
+  mini: 'نگه‌شان دار برای شارژ کمبو، ولی محاصره نشو.',
+  sniper: 'لیزر باریک = مرگ؛ پشت سر هم حرکت کن، ثابت نمان.',
+  tank: 'دمیج‌زن قوی لازم دارد؛ کریت و نووا جواب می‌دهد.',
+  lancer: 'شارژش خطی است — یک قدم کنار، بعد ضدحمله.',
+  hive: 'مینی‌فکتوری است؛ هر ثانیه دیر کنی گله می‌شود.',
+  stinger: 'استرِیف می‌کند؛ پیش‌بینی مسیر و شلیک زودهنگام.',
+  bomber: 'سوت = ۰.۸ ثانیه وقت داری؛ دش نجاتت می‌دهد.',
+  tesla: 'خط تلگراف را قطع کن — نزدیکش نشو.',
+  mortar: 'دایره تلگراف را جدی بگیر؛ مدام در حرکت باش.',
+  mender: 'اولویت اول! تا زنده است همه درمان می‌شوند.',
+  mirage: 'قبل از تله‌پورت برق می‌زند؛ همان لحظه دش بزن.',
+  boss: 'اسپیرال زیر ۵۵٪ جان شروع می‌شود — فاصله بگیر و بچرخ.',
+  juggernaut: 'شارژش را به دیوار بکشان، بعد از بغل بزن.',
+  tempest: '⚡ روی سرت = صاعقه؛ فوراً آن نقطه را ترک کن.',
+  voidborn: 'همه‌چیز با هم: اسپیرال، احضار، رگبار و کوبش — ذخیره دش نگه دار.',
 };
 
 /** Difficulty tuning. Insane is a real hell now: brutal stats, denser
@@ -111,19 +195,19 @@ export function bulletSpeedMultFor(d: Difficulty): number {
   return d === 'insane' ? 1.12 : 1;
 }
 
-export const BOSS_KINDS: readonly EnemyKind[] = ['boss', 'juggernaut', 'tempest'];
+export const BOSS_KINDS: readonly EnemyKind[] = ['boss', 'juggernaut', 'tempest', 'voidborn'];
 
 export function isBossKind(kind: EnemyKind): boolean {
-  return kind === 'boss' || kind === 'juggernaut' || kind === 'tempest';
+  return kind === 'boss' || kind === 'juggernaut' || kind === 'tempest' || kind === 'voidborn';
 }
 
-/** Which boss guards a boss wave. Wave 20 is always the Overlord finale;
- *  endless waves keep cycling the trio. */
+/** Wave 20 is always the Voidborn finale; endless waves keep cycling
+ *  the quartet (the Voidborn returns every 20 waves). */
 export function bossVariantForWave(wave: number): EnemyKind {
-  if (wave === WIN_WAVE) return 'boss';
-  const cycle: EnemyKind[] = ['boss', 'juggernaut', 'tempest'];
+  if (wave === WIN_WAVE) return 'voidborn';
+  const cycle: EnemyKind[] = ['boss', 'juggernaut', 'tempest', 'voidborn'];
   const tier = Math.max(1, Math.round(wave / 5));
-  return cycle[(((tier - 1) % 3) + 3) % 3];
+  return cycle[(((tier - 1) % 4) + 4) % 4];
 }
 
 /** Shared boss HP ladder — every 5 waves the bosses get meaner. */
@@ -165,10 +249,11 @@ export function pickKindFor(wave: number, mutator: MutatorKind | null): EnemyKin
   if (w >= 3) bag.push('dasher', 'dasher');
   if (w >= 4) bag.push('shooter', 'lancer', 'bomber');
   if (w >= 5) bag.push('splitter', 'stinger');
-  if (w >= 6) bag.push('shooter', 'dasher', 'sniper', 'hive', 'stinger');
+  if (w >= 6) bag.push('shooter', 'dasher', 'sniper', 'hive', 'stinger', 'mortar');
   if (w >= 7) bag.push('tank', 'lancer', 'stinger', 'tesla');
-  if (w >= 8) bag.push('splitter', 'weaver', 'sniper', 'bomber');
-  if (w >= 10) bag.push('tank', 'shooter', 'stinger', 'tesla');
+  if (w >= 8) bag.push('splitter', 'weaver', 'sniper', 'bomber', 'mirage');
+  if (w >= 9) bag.push('mender', 'mortar', 'mirage');
+  if (w >= 10) bag.push('tank', 'shooter', 'stinger', 'tesla', 'mender');
   return bag[Math.floor(Math.random() * bag.length)];
 }
 
@@ -280,6 +365,27 @@ export function createEnemy(kind: EnemyKind, x: number, y: number, ctx: SpawnCon
       base.xp = 14; base.score = 85; base.r = 15;
       base.fireCd = rand(1.6, 2.4);
       break;
+    case 'mortar':
+      base.hp = base.maxHp = 64 * wScale * d.hp;
+      base.speed = 96 * d.speed;
+      base.dmg = 12 * d.dmg;
+      base.xp = 15; base.score = 90; base.r = 17;
+      base.fireCd = rand(1.8, 2.6);
+      break;
+    case 'mender':
+      base.hp = base.maxHp = 72 * wScale * d.hp;
+      base.speed = 118 * d.speed;
+      base.dmg = 8 * d.dmg;
+      base.xp = 16; base.score = 95; base.r = 16;
+      base.fireCd = 0.8; // doubles as heal-tick timer
+      break;
+    case 'mirage':
+      base.hp = base.maxHp = 38 * wScale * d.hp;
+      base.speed = 238 * d.speed;
+      base.dmg = 13 * d.dmg;
+      base.xp = 14; base.score = 85; base.r = 14;
+      base.stateT = rand(1.6, 2.6);
+      break;
     case 'boss': {
       const mult = bossMultFor(ctx.wave);
       base.hp = base.maxHp = 950 * mult * d.hp;
@@ -305,6 +411,17 @@ export function createEnemy(kind: EnemyKind, x: number, y: number, ctx: SpawnCon
       base.xp = 150; base.score = 2200; base.r = 44;
       base.fireCd = rand(1, 1.8);
       base.summonT = 7;
+      break;
+    }
+    case 'voidborn': {
+      const mult = bossMultFor(ctx.wave);
+      base.hp = base.maxHp = 1650 * mult * d.hp;
+      base.speed = 108 * d.speed;
+      base.dmg = 25 * d.dmg;
+      base.xp = 220; base.score = 3500; base.r = 60;
+      base.fireCd = rand(1, 1.6);
+      base.summonT = 6;
+      base.stateT = 4;
       break;
     }
   }

@@ -33,6 +33,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'stormlord', nameFa: 'ارباب طوفان', nameEn: 'STORM LORD', descFa: 'گرفتن گلوله‌های طوفانی', icon: 'combo' },
   { id: 'phoenix_rise', nameFa: 'برخاستن ققنوس', nameEn: 'PHOENIX RISE', descFa: 'احیا با هسته ققنوس', icon: 'heartpulse' },
   { id: 'fusion', nameFa: 'ذوب خلأ', nameEn: 'VOID FUSION', descFa: 'تکمیل یک ترکیب سینرژیک', icon: 'gem' },
+  { id: 'voidborn_slayer', nameFa: 'فاتح خلأ', nameEn: 'VOIDBORN SLAYER', descFa: 'شکست خلأزاد در فینال موج ۲۰', icon: 'void' },
 ];
 
 const KEY = 'neon-void-achievements-v1';

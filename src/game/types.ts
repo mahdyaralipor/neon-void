@@ -62,9 +62,13 @@ export type EnemyKind =
   | 'stinger'
   | 'bomber'
   | 'tesla'
+  | 'mortar'
+  | 'mender'
+  | 'mirage'
   | 'boss'
   | 'juggernaut'
-  | 'tempest';
+  | 'tempest'
+  | 'voidborn';
 
 export type PowerUpKind = 'shield' | 'magnet' | 'nuke' | 'overdrive' | 'heal' | 'frost' | 'greed' | 'phase';
 

@@ -1555,6 +1555,22 @@ export class GameEngine {
     return best;
   }
 
+  /** nearest wounded non-boss ally — the mender's patient */
+  private nearestWoundedAlly(self: Enemy): Enemy | null {
+    let best: Enemy | null = null;
+    let bd = Infinity;
+    for (const o of this.enemies) {
+      if (o === self || o.hp <= 0 || o.spawnT > 0 || isBossKind(o.kind)) continue;
+      if (o.hp >= o.maxHp) continue;
+      const d = dist2(self.x, self.y, o.x, o.y);
+      if (d < bd) {
+        bd = d;
+        best = o;
+      }
+    }
+    return best;
+  }
+
   private nearestEnemies(x: number, y: number, maxD: number, count: number): Enemy[] {
     const maxD2 = maxD * maxD;
     const out: { e: Enemy; d: number }[] = [];
@@ -2247,6 +2263,133 @@ export class GameEngine {
           }
           break;
         }
+        case 'mortar': {
+          // artillery: holds ~480 range, lobs a shell — telegraphed AoE circle
+          const want = 480;
+          const dir = dist > want + 70 ? 1 : dist < want - 70 ? -1 : 0;
+          const strafeAng = ang + Math.PI / 2 * e.strafe;
+          const tx = Math.cos(ang) * dir * e.speed + Math.cos(strafeAng) * e.speed * 0.5;
+          const ty = Math.sin(ang) * dir * e.speed + Math.sin(strafeAng) * e.speed * 0.5;
+          e.vx += (tx - e.vx) * Math.min(1, dt * 2.2);
+          e.vy += (ty - e.vy) * Math.min(1, dt * 2.2);
+          if (Math.random() < dt * 0.3) e.strafe *= -1;
+          e.stateT -= dt;
+          if (e.state === 0 && e.fireCd <= 0 && dist < 700) {
+            e.state = 1;
+            e.stateT = 0.95;
+            // lock the firing solution at launch — keep moving to dodge it
+            e.lockDx = px;
+            e.lockDy = py;
+            this.fx.text(px, py - 26, '◎', '#cbd5e1', 22);
+            this.audio.sniperShot();
+          } else if (e.state === 1) {
+            e.vx *= 1 - Math.min(1, dt * 3);
+            e.vy *= 1 - Math.min(1, dt * 3);
+            if (e.stateT <= 0) {
+              e.state = 0;
+              e.fireCd = rand(2.4, 3.4);
+              const sx = e.lockDx;
+              const sy = e.lockDy;
+              this.fx.shockwave(sx, sy, '#cbd5e1', 150, 0.45, 6);
+              this.fx.explosion(sx, sy, '#fb923c', 26, 460);
+              this.audio.nova();
+              if (!this.reducedMotion) this.trauma = Math.min(1, this.trauma + 0.2);
+              if (dist2(sx, sy, px, py) < 112 * 112) {
+                this.damagePlayer(15 + this.wave * 0.7, sx, sy, 'خمپاره‌چی');
+              }
+              for (const o of this.enemies) {
+                if (o.hp > 0 && o.spawnT <= 0 && o !== e && dist2(sx, sy, o.x, o.y) < 90 * 90) {
+                  this.damageEnemy(o, 24 + this.wave * 1.5, false, o.x - sx, o.y - sy);
+                }
+              }
+              this.sweepDeadEnemies();
+            }
+          }
+          break;
+        }
+        case 'mender': {
+          // field medic: heals allies, flees the player — kill it first
+          const ally = this.nearestWoundedAlly(e);
+          let mx = 0;
+          let my = 0;
+          if (dist < 250) {
+            // too close — flee!
+            mx = -Math.cos(ang);
+            my = -Math.sin(ang);
+          } else if (ally) {
+            const a = angleTo(e.x, e.y, ally.x, ally.y);
+            const ad = Math.hypot(ally.x - e.x, ally.y - e.y);
+            if (ad > 220) {
+              mx = Math.cos(a);
+              my = Math.sin(a);
+            }
+          } else {
+            mx = Math.cos(ang) * 0.4;
+            my = Math.sin(ang) * 0.4;
+          }
+          e.vx += (mx * e.speed - e.vx) * Math.min(1, dt * 2.5);
+          e.vy += (my * e.speed - e.vy) * Math.min(1, dt * 2.5);
+          // heal tick: mend wounded allies in radius
+          if (e.fireCd <= 0) {
+            e.fireCd = 0.9;
+            let healed = false;
+            for (const o of this.enemies) {
+              if (o === e || o.hp <= 0 || o.spawnT > 0 || isBossKind(o.kind)) continue;
+              if (o.hp >= o.maxHp) continue;
+              if (dist2(e.x, e.y, o.x, o.y) > 300 * 300) continue;
+              o.hp = Math.min(o.maxHp, o.hp + 10 + this.wave * 1.2);
+              this.fx.hitSpark((e.x + o.x) / 2, (e.y + o.y) / 2, Math.atan2(o.y - e.y, o.x - e.x), '#bef264');
+              healed = true;
+            }
+            if (healed) {
+              this.fx.shockwave(e.x, e.y, '#bef264', 90, 0.35, 3);
+              e.flash = Math.max(e.flash, 0.35);
+            }
+          }
+          break;
+        }
+        case 'mirage': {
+          // blinker: stalks fast, telegraphs, teleports behind you, lunges
+          e.stateT -= dt;
+          if (e.state === 0) {
+            e.vx += (Math.cos(ang) * e.speed - e.vx) * Math.min(1, dt * 3.5);
+            e.vy += (Math.sin(ang) * e.speed - e.vy) * Math.min(1, dt * 3.5);
+            if (e.stateT <= 0 && dist < 640) {
+              e.state = 1;
+              e.stateT = 0.45;
+              this.audio.sniperShot();
+            }
+          } else if (e.state === 1) {
+            // telegraph: freeze + flare up
+            e.vx *= 1 - Math.min(1, dt * 8);
+            e.vy *= 1 - Math.min(1, dt * 8);
+            e.flash = Math.max(e.flash, 0.6);
+            if (Math.random() < dt * 24) this.fx.trail(e.x, e.y, '#a5f3fc');
+            if (e.stateT <= 0) {
+              // blink to the player's flank
+              const ba = ang + (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + rand(-0.4, 0.4));
+              const bd = 150;
+              this.fx.explosion(e.x, e.y, '#a5f3fc', 14, 300);
+              e.x = clamp(px + Math.cos(ba) * bd, e.r, WORLD_W - e.r);
+              e.y = clamp(py + Math.sin(ba) * bd, e.r, WORLD_H - e.r);
+              this.fx.shockwave(e.x, e.y, '#a5f3fc', 110, 0.4, 4);
+              this.fx.explosion(e.x, e.y, '#a5f3fc', 14, 300);
+              e.state = 2;
+              e.stateT = 0.55;
+            }
+          } else {
+            // lunge!
+            const la = angleTo(e.x, e.y, px, py);
+            e.vx += (Math.cos(la) * e.speed * 2.4 - e.vx) * Math.min(1, dt * 6);
+            e.vy += (Math.sin(la) * e.speed * 2.4 - e.vy) * Math.min(1, dt * 6);
+            if (Math.random() < dt * 30) this.fx.trail(e.x, e.y, '#a5f3fc');
+            if (e.stateT <= 0) {
+              e.state = 0;
+              e.stateT = rand(1.8, 3);
+            }
+          }
+          break;
+        }
         case 'juggernaut': {
           // slow siege engine: radial fire + telegraphed lane charges
           const enraged = e.hp < e.maxHp * 0.35;
@@ -2361,6 +2504,94 @@ export class GameEngine {
               for (const o of this.enemies) {
                 if (o.hp > 0 && o.spawnT <= 0 && o !== e && dist2(sx, sy, o.x, o.y) < 120 * 120) {
                   this.damageEnemy(o, 50 + this.wave * 3, false, o.x - sx, o.y - sy);
+                }
+              }
+              this.sweepDeadEnemies();
+            }
+          }
+          break;
+        }
+        case 'voidborn': {
+          // FINALE — every boss kit at once: spiral + fan + summons + void slam
+          const enraged = e.hp < e.maxHp * 0.35;
+          const tier = Math.max(1, Math.round(this.wave / 5));
+          if (!this.bossSpiralAnn && e.hp < e.maxHp * 0.7) {
+            this.bossSpiralAnn = true;
+            this.setAnnounce('🕳️ خلأزاد بیدار شد — الگوی کامل!', 2.4, 3);
+            this.audio.bossSpawn();
+            this.trauma = Math.min(1, this.trauma + 0.5);
+          }
+          if (!this.bossEnrageAnn && enraged) {
+            this.bossEnrageAnn = true;
+            this.setAnnounce('🔥 خشم خلأ!', 2.2, 3);
+            this.audio.bossSpawn();
+            this.trauma = Math.min(1, this.trauma + 0.5);
+          }
+          const sp = e.speed * (enraged ? 1.5 : 1);
+          e.vx += (Math.cos(ang) * sp - e.vx) * Math.min(1, dt * 1.8);
+          e.vy += (Math.sin(ang) * sp - e.vy) * Math.min(1, dt * 1.8);
+          // spiral barrage (denser than the overlord's)
+          e.spiralT -= dt;
+          if (e.spiralT <= 0) {
+            e.spiralT = (enraged ? 0.13 : 0.19) * (tier >= 4 ? 0.8 : 1);
+            e.spiralA += 0.62;
+            for (let k = 0; k < 3; k++) {
+              const a = e.spiralA + k * TAU / 3;
+              this.fireEnemyBullet(
+                e.x, e.y, Math.cos(a) * 235, Math.sin(a) * 235,
+                6, e.dmg * 0.55, 4.5,
+              );
+            }
+          }
+          // aimed fan burst
+          if (e.fireCd <= 0 && dist < 760) {
+            e.fireCd = enraged ? 1.4 : 2;
+            const a0 = angleTo(e.x, e.y, px, py);
+            for (let k = -2; k <= 2; k++) {
+              const a = a0 + k * 0.13;
+              const bsp = 470 + this.wave * 8;
+              this.fireEnemyBullet(e.x, e.y, Math.cos(a) * bsp, Math.sin(a) * bsp, 6, e.dmg * 0.7, 2.8);
+            }
+            this.audio.enemyShoot();
+            this.fx.muzzle(e.x, e.y, a0, '#ddd6fe');
+          }
+          // escorts: mirages, mortars and a mender that must die first
+          e.summonT -= dt;
+          if (e.summonT <= 0) {
+            e.summonT = enraged ? 7 : 10;
+            const pack: EnemyKind[] = ['mirage', 'mortar', 'mender'];
+            for (let i = 0; i < 3; i++) {
+              const m = this.makeEnemy(pack[i % pack.length], e.x + rand(-110, 110), e.y + rand(-110, 110));
+              m.spawnT = 0.5;
+              this.enemies.push(m);
+            }
+            this.fx.shockwave(e.x, e.y, '#ddd6fe', 170, 0.5, 4);
+          }
+          // void slam: telegraphed AoE at the player's feet (state 0 idle, 1 armed)
+          e.stateT -= dt;
+          if (e.state === 0 && e.stateT <= 0) {
+            e.state = 1;
+            e.stateT = 0.85;
+            e.lockDx = px;
+            e.lockDy = py;
+            this.fx.text(px, py - 34, '🕳️', '#ddd6fe', 24);
+            this.audio.sniperShot();
+          } else if (e.state === 1) {
+            if (e.stateT <= 0) {
+              e.state = 0;
+              e.stateT = enraged ? 4.5 : 6.5;
+              const sx = e.lockDx;
+              const sy = e.lockDy;
+              this.fx.shockwave(sx, sy, '#ddd6fe', 220, 0.55, 8);
+              this.fx.explosion(sx, sy, '#ff2d78', 40, 560);
+              this.audio.nuke();
+              if (!this.reducedMotion) this.trauma = Math.min(1, this.trauma + 0.4);
+              if (dist2(sx, sy, px, py) < 150 * 150) {
+                this.damagePlayer(24 + this.wave * 0.7, sx, sy, 'خلأزاد');
+              }
+              for (const o of this.enemies) {
+                if (o.hp > 0 && o.spawnT <= 0 && o !== e && dist2(sx, sy, o.x, o.y) < 150 * 150) {
+                  this.damageEnemy(o, 60 + this.wave * 3, false, o.x - sx, o.y - sy);
                 }
               }
               this.sweepDeadEnemies();
@@ -2704,6 +2935,11 @@ export class GameEngine {
       this.fx.text(e.x, e.y, `+${Math.round(pts)}`, '#ffd319', 26);
       this.dropPowerup(e.x, e.y, true);
       this.grantAchievement('boss1');
+      if (e.kind === 'voidborn') {
+        this.grantAchievement('voidborn_slayer');
+        this.setAnnounce('🕳️ خلأزاد سقوط کرد! (+8 ◇)', 2.8, 3);
+        this.awardShards(8);
+      }
       if (!this.bossDamageTaken) this.grantAchievement('flawless_boss');
       this.defeatedBosses.add(e.kind);
       if (this.defeatedBosses.size >= 3) this.grantAchievement('boss_trio');
@@ -3727,7 +3963,7 @@ export class GameEngine {
     ctx.translate(e.x, e.y);
     const hunter = this.coOp ? pickTarget(e.x, e.y, this.fighters[0], this.fighters[1]) : this.fighters[0];
     const face = angleTo(e.x, e.y, hunter.x, hunter.y);
-    ctx.rotate(e.kind === 'shooter' || isBossKind(e.kind) || e.kind === 'sniper' || e.kind === 'lancer' || e.kind === 'stinger' || e.kind === 'tesla' || e.kind === 'tempest' ? face : face + e.t * 0.6);
+    ctx.rotate(e.kind === 'shooter' || isBossKind(e.kind) || e.kind === 'sniper' || e.kind === 'lancer' || e.kind === 'stinger' || e.kind === 'tesla' || e.kind === 'tempest' || e.kind === 'mortar' || e.kind === 'mirage' ? face : face + e.t * 0.6);
     // hit squash — the hull pops on impact, then settles (flash decays 5/s)
     const squash = 1 + Math.min(0.16, e.flash * 0.16);
     ctx.scale(squash, squash);
@@ -3874,6 +4110,36 @@ export class GameEngine {
       ctx.lineTo(-e.r * 0.45, 0);
       ctx.lineTo(0, -e.r * 0.36);
       ctx.closePath();
+    } else if (e.kind === 'mortar') {
+      // heavy pentagon — the artillery hull
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * TAU - Math.PI / 2;
+        const px = Math.cos(a) * e.r;
+        const py = Math.sin(a) * e.r;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    } else if (e.kind === 'mender') {
+      // round medic hull — the cross comes in details
+      ctx.arc(0, 0, e.r, 0, TAU);
+    } else if (e.kind === 'mirage') {
+      // hollow phase-triangle — reads ghostly next to solid hulls
+      ctx.moveTo(e.r + 4, 0);
+      ctx.lineTo(-e.r * 0.7, e.r * 0.72);
+      ctx.lineTo(-e.r * 0.7, -e.r * 0.72);
+      ctx.closePath();
+    } else if (e.kind === 'voidborn') {
+      // void rift — 12 jagged spikes around a dark heart
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * TAU;
+        const rr = i % 2 === 0 ? e.r : e.r * 0.8;
+        const px = Math.cos(a) * rr;
+        const py = Math.sin(a) * rr;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
     } else if (e.kind === 'juggernaut') {
       // siege hexagon — mass reads before detail does
       for (let i = 0; i < 6; i++) {
@@ -3994,6 +4260,78 @@ export class GameEngine {
         ctx.stroke();
         ctx.restore();
       }
+    } else if (e.kind === 'mortar') {
+      // stubby cannon + shell loaded glow (white-hot while armed)
+      ctx.fillStyle = body;
+      ctx.fillRect(e.r * 0.5, -4, e.r * 0.62, 8);
+      ctx.fillStyle = e.state === 1 ? '#ffffff' : '#fb923c';
+      ctx.beginPath();
+      ctx.arc(e.r * 1.05, 0, 3.2, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = body;
+      ctx.globalAlpha = 0.5 * dim;
+      ctx.beginPath();
+      ctx.arc(0, 0, e.r * 0.55, 0, TAU);
+      ctx.stroke();
+      ctx.globalAlpha = dim;
+    } else if (e.kind === 'mender') {
+      // medic cross + healing pulse ring
+      ctx.fillStyle = body;
+      const c = e.r * 0.34;
+      ctx.fillRect(-c, -c * 0.32, c * 2, c * 0.64);
+      ctx.fillRect(-c * 0.32, -c, c * 0.64, c * 2);
+      ctx.save();
+      ctx.globalAlpha = 0.35 + 0.15 * Math.sin(e.t * 4);
+      ctx.strokeStyle = body;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 6]);
+      ctx.lineDashOffset = -e.t * 30;
+      ctx.beginPath();
+      ctx.arc(0, 0, e.r + 5, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+    } else if (e.kind === 'mirage') {
+      // phase core + blink residue ticks
+      ctx.fillStyle = e.state === 1 ? '#ffffff' : body;
+      ctx.beginPath();
+      ctx.arc(e.r * 0.1, 0, Math.max(2, e.r * 0.2), 0, TAU);
+      ctx.fill();
+      ctx.save();
+      ctx.globalAlpha = 0.45 * dim;
+      ctx.strokeStyle = body;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-e.r * 0.2, e.r * 0.5);
+      ctx.lineTo(-e.r * 0.85, e.r * 0.85);
+      ctx.moveTo(-e.r * 0.2, -e.r * 0.5);
+      ctx.lineTo(-e.r * 0.85, -e.r * 0.85);
+      ctx.stroke();
+      ctx.restore();
+    } else if (e.kind === 'voidborn') {
+      // orbiting rift shards + void heart (burns red when enraged)
+      ctx.save();
+      ctx.rotate(e.t * 1.1);
+      ctx.strokeStyle = body;
+      ctx.globalAlpha = 0.7 * dim;
+      ctx.lineWidth = 1.6;
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * TAU;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * (e.r + 8), Math.sin(a) * (e.r + 8));
+        ctx.lineTo(Math.cos(a) * (e.r + 15), Math.sin(a) * (e.r + 15));
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.save();
+      ctx.globalAlpha = 0.5 * dim;
+      ctx.strokeStyle = enraged ? '#ff5d5d' : '#8b7cf6';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 8]);
+      ctx.lineDashOffset = e.t * 60;
+      ctx.beginPath();
+      ctx.arc(0, 0, e.r * 0.52, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
     } else if (e.kind === 'juggernaut') {
       // magma cracks + charge lane telegraph
       ctx.strokeStyle = enraged ? '#ffd319' : 'rgba(255,220,150,0.7)';
@@ -4104,7 +4442,7 @@ export class GameEngine {
     ctx.restore();
 
     // hp bar — hairline
-    if ((e.kind === 'splitter' || e.kind === 'shooter' || e.kind === 'dasher' || isBossKind(e.kind) || e.kind === 'tank' || e.kind === 'sniper' || e.kind === 'lancer' || e.kind === 'hive' || e.kind === 'tesla' || e.kind === 'bomber' || e.elite) && e.hp < e.maxHp) {
+    if ((e.kind === 'splitter' || e.kind === 'shooter' || e.kind === 'dasher' || isBossKind(e.kind) || e.kind === 'tank' || e.kind === 'sniper' || e.kind === 'lancer' || e.kind === 'hive' || e.kind === 'tesla' || e.kind === 'bomber' || e.kind === 'mortar' || e.kind === 'mender' || e.kind === 'mirage' || e.elite) && e.hp < e.maxHp) {
       const w = isBossKind(e.kind) ? 96 : e.kind === 'tank' || e.kind === 'hive' ? 48 : 30;
       const frac = clamp(e.hp / e.maxHp, 0, 1);
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -4154,6 +4492,46 @@ export class GameEngine {
       ctx.stroke();
       ctx.restore();
     }
+    // mortar shell telegraph — impact ring at the locked point (world space)
+    if (e.kind === 'mortar' && e.state === 1) {
+      const k = 1 - Math.max(0, e.stateT) / 0.95;
+      ctx.save();
+      ctx.globalAlpha = 0.35 + k * 0.4;
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 8]);
+      ctx.lineDashOffset = -e.t * 70;
+      ctx.beginPath();
+      ctx.arc(e.lockDx, e.lockDy, 40 + k * 72, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.1 + k * 0.12;
+      ctx.fillStyle = '#fb923c';
+      ctx.beginPath();
+      ctx.arc(e.lockDx, e.lockDy, 112, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+    // voidborn slam telegraph — impact ring at the locked point (world space)
+    if (e.kind === 'voidborn' && e.state === 1) {
+      const k = 1 - Math.max(0, e.stateT) / 0.85;
+      ctx.save();
+      ctx.globalAlpha = 0.4 + k * 0.45;
+      ctx.strokeStyle = '#ddd6fe';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([12, 9]);
+      ctx.lineDashOffset = -e.t * 90;
+      ctx.beginPath();
+      ctx.arc(e.lockDx, e.lockDy, 50 + k * 100, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.1 + k * 0.14;
+      ctx.fillStyle = '#ff2d78';
+      ctx.beginPath();
+      ctx.arc(e.lockDx, e.lockDy, 150, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   /** edge arrows pointing at dangerous offscreen enemies */
@@ -4168,7 +4546,7 @@ export class GameEngine {
     for (const e of this.enemies) {
       if (drawn >= 6 || e.hp <= 0 || e.spawnT > 0) continue;
       const threat =
-        isBossKind(e.kind) ? 3 : e.elite ? 2 : e.kind === 'shooter' || e.kind === 'sniper' || e.kind === 'tesla' || e.kind === 'bomber' ? 1 : 0;
+        isBossKind(e.kind) ? 3 : e.elite ? 2 : e.kind === 'shooter' || e.kind === 'sniper' || e.kind === 'tesla' || e.kind === 'bomber' || e.kind === 'mortar' || e.kind === 'mirage' ? 1 : 0;
       if (threat === 0) continue;
       // onscreen? skip
       if (e.x > camX && e.x < camX + this.viewW && e.y > camY && e.y < camY + this.viewH) continue;

@@ -5,6 +5,9 @@ import {
   ENEMY_COLOR,
   ENEMY_FA,
   ENEMY_LORE,
+  ENEMY_ROLE,
+  ENEMY_TIP,
+  ENEMY_UNLOCK,
   bossMultFor,
   bossVariantForWave,
   bulletSpeedMultFor,
@@ -22,37 +25,44 @@ const ctx: SpawnContext = {
 };
 
 describe('roster integrity', () => {
-  it('every kind has color, name and lore', () => {
+  it('every kind has color, name, lore, role, tip and unlock wave', () => {
     const kinds = Object.keys(ENEMY_COLOR);
-    expect(kinds.length).toBeGreaterThanOrEqual(16);
+    expect(kinds.length).toBe(20);
     for (const k of kinds) {
-      expect(ENEMY_FA[k as keyof typeof ENEMY_FA]).toBeTruthy();
-      expect(ENEMY_LORE[k as keyof typeof ENEMY_LORE]).toBeTruthy();
+      const key = k as keyof typeof ENEMY_FA;
+      expect(ENEMY_FA[key]).toBeTruthy();
+      expect(ENEMY_LORE[key]).toBeTruthy();
+      expect(ENEMY_ROLE[key]).toBeTruthy();
+      expect(ENEMY_TIP[key]).toBeTruthy();
+      expect(ENEMY_UNLOCK[key]).toBeGreaterThan(0);
     }
   });
 
-  it('knows the three bosses', () => {
-    expect(BOSS_KINDS).toEqual(['boss', 'juggernaut', 'tempest']);
+  it('knows the four bosses', () => {
+    expect(BOSS_KINDS).toEqual(['boss', 'juggernaut', 'tempest', 'voidborn']);
     for (const b of BOSS_KINDS) expect(isBossKind(b)).toBe(true);
     expect(isBossKind('chaser')).toBe(false);
     expect(isBossKind('tesla')).toBe(false);
+    expect(isBossKind('mender')).toBe(false);
   });
 });
 
 describe('bossVariantForWave', () => {
-  it('rotates the trio across boss waves', () => {
+  it('rotates the quartet across boss waves', () => {
     expect(bossVariantForWave(5)).toBe('boss');
     expect(bossVariantForWave(10)).toBe('juggernaut');
     expect(bossVariantForWave(15)).toBe('tempest');
   });
 
-  it('reserves the Overlord for the wave-20 finale', () => {
-    expect(bossVariantForWave(20)).toBe('boss');
+  it('reserves the Voidborn for the wave-20 finale', () => {
+    expect(bossVariantForWave(20)).toBe('voidborn');
   });
 
-  it('keeps cycling in endless', () => {
-    expect(bossVariantForWave(25)).toBe('juggernaut');
-    expect(bossVariantForWave(30)).toBe('tempest');
+  it('keeps cycling the quartet in endless', () => {
+    expect(bossVariantForWave(25)).toBe('boss');
+    expect(bossVariantForWave(30)).toBe('juggernaut');
+    expect(bossVariantForWave(35)).toBe('tempest');
+    expect(bossVariantForWave(40)).toBe('voidborn');
   });
 
   it('scales the boss ladder with waves', () => {
@@ -74,6 +84,42 @@ describe('createEnemy', () => {
     const e = createEnemy('tesla', 100, 100, ctx);
     expect(e.fireCd).toBeGreaterThan(0);
     expect(e.speed).toBeLessThan(120);
+  });
+
+  it('builds the v7.6 roster additions with sane stats', () => {
+    const mortar = createEnemy('mortar', 0, 0, ctx);
+    expect(mortar.r).toBe(17);
+    expect(mortar.fireCd).toBeGreaterThan(0);
+    const mender = createEnemy('mender', 0, 0, ctx);
+    expect(mender.r).toBe(16);
+    expect(mender.dmg).toBeLessThan(createEnemy('chaser', 0, 0, ctx).dmg);
+    const mirage = createEnemy('mirage', 0, 0, ctx);
+    expect(mirage.speed).toBeGreaterThan(200);
+    expect(mirage.stateT).toBeGreaterThan(0);
+    const over = createEnemy('boss', 0, 0, ctx);
+    const vb = createEnemy('voidborn', 0, 0, { ...ctx, wave: 20 });
+    expect(vb.maxHp).toBeGreaterThan(over.maxHp);
+    expect(vb.score).toBeGreaterThan(over.score);
+    expect(vb.r).toBe(60);
+    expect(vb.summonT).toBeGreaterThan(0);
+  });
+
+  it('unlocks the new blood on schedule', () => {
+    const seen6 = new Set<string>();
+    for (let i = 0; i < 500; i++) seen6.add(pickKindFor(6, null));
+    expect(seen6.has('mortar')).toBe(true);
+    const seen8 = new Set<string>();
+    for (let i = 0; i < 500; i++) seen8.add(pickKindFor(8, null));
+    expect(seen8.has('mirage')).toBe(true);
+    const seen10 = new Set<string>();
+    for (let i = 0; i < 500; i++) seen10.add(pickKindFor(10, null));
+    expect(seen10.has('mender')).toBe(true);
+    // newcomers stay locked early
+    const seen3 = new Set<string>();
+    for (let i = 0; i < 300; i++) seen3.add(pickKindFor(3, null));
+    expect(seen3.has('mortar')).toBe(false);
+    expect(seen3.has('mirage')).toBe(false);
+    expect(seen3.has('mender')).toBe(false);
   });
 
   it('builds a juggernaut heavier than the overlord', () => {
@@ -105,6 +151,7 @@ describe('createEnemy', () => {
       expect(createEnemy('boss', 0, 0, { ...ctx, wave: 20 }).elite).toBe(false);
       expect(createEnemy('juggernaut', 0, 0, { ...ctx, wave: 20 }).elite).toBe(false);
       expect(createEnemy('tempest', 0, 0, { ...ctx, wave: 20 }).elite).toBe(false);
+      expect(createEnemy('voidborn', 0, 0, { ...ctx, wave: 20 }).elite).toBe(false);
       expect(createEnemy('mini', 0, 0, ctx).elite).toBe(false);
     }
   });
