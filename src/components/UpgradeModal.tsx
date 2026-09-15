@@ -1,6 +1,6 @@
 import {
-  Activity, ArrowRight, Crosshair, Droplet, Flame, Gauge, Heart,
-  Magnet, Shield, Split, Star, Swords, Wind, Zap, Rocket,
+  Activity, ArrowRight, Bomb, CloudLightning, Coins, Crosshair, Dna, Droplet, Flame, Gauge, Ghost, Heart,
+  Magnet, PlugZap, Radiation, Shield, Split, Star, Swords, Timer, Tornado, Wind, Zap, Rocket,
   Orbit, Axe, Skull, Sparkles, Siren, Shell, HeartPulse, Dices,
 } from 'lucide-react';
 import type { UpgradeDef } from '../game/types';
@@ -46,6 +46,15 @@ const ICONS: Record<string, typeof Zap> = {
   phasedive: Wind,
   sniper: Crosshair,
   fortress: Shield,
+  storm: CloudLightning,
+  detonate: Bomb,
+  novadrive: Tornado,
+  vampire: Ghost,
+  twinlink: Dna,
+  phoenix: Radiation,
+  temporal: Timer,
+  midas: Coins,
+  hyperrail: PlugZap,
 };
 
 const TIER_CARD: Record<string, string> = {

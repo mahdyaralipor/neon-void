@@ -28,6 +28,7 @@ import { ParticleSystem } from './particles';
 import { drawGlow, gemSpriteTier, gemTierFor } from './sprites';
 import {
   applyUpgrade, rollUpgrades, executionerMult, comboScoreMult, comboWindow, thornsDamage,
+  stormProcChance, stormTargets, critNovaMult, critNovaRadius, midasGemMult, midasScoreMult,
 } from './upgrades';
 import { angleTo, clamp, dist2, rand, sweep, TAU } from './utils';
 import { saveBest, pushBoard, addTotals, addShards, pushRun, saveCheckpoint, clearCheckpoint } from './storage';
@@ -274,6 +275,7 @@ export class GameEngine {
   private endless = false;
   private endlessAnn = false;
   private chainCd = 2;
+  private lastStormSfx = 0;
   private stormT = 3;
   private stormWarn: { x: number; y: number; t: number } | null = null;
   private frameCount = 0;
@@ -459,9 +461,13 @@ export class GameEngine {
   applyUpgrade(id: string): void {
     applyUpgrade(this.stats, id);
     if (id === 'maxhp') this.hp = Math.min(this.stats.maxHp, this.hp + 25);
+    if (id === 'phoenix') this.hp = Math.min(this.stats.maxHp, this.hp + 20);
     if (id === 'orbital' && this.stats.orbitals >= 3) this.grantAchievement('orbital3');
     if (id === 'chain') this.grantAchievement('chainlord');
+    if (id === 'stormrounds') this.grantAchievement('stormlord');
     this.taken.set(id, (this.taken.get(id) ?? 0) + 1);
+    // v7.5 fusion: completing a synergy pair pays an achievement
+    if (this.isFusionComplete()) this.grantAchievement('fusion');
     this.audio.upgradePick();
     this.fx.shockwave(this.px, this.py, '#a3ff12', 160, 0.5, 5);
     this.pendingLevels = Math.max(0, this.pendingLevels - 1);
@@ -473,6 +479,22 @@ export class GameEngine {
       this.last = performance.now();
     }
     this.emitHud();
+  }
+
+  /** v7.5: true when any hybrid + its partner are both owned */
+  private isFusionComplete(): boolean {
+    const has = (k: string) => (this.taken.get(k) ?? 0) > 0;
+    return (
+      (has('stormrounds') && (has('chain') || has('velocity'))) ||
+      (has('critnova') && (has('crit') || has('headhunter'))) ||
+      (has('novadash') && (has('nova') || has('dash') || has('phasedive'))) ||
+      (has('vampire') && (has('orbital') || has('lifesteal'))) ||
+      (has('twinlink') && has('seeker')) ||
+      (has('phoenix') && has('secondwind')) ||
+      (has('temporal') && (has('dash') || has('phasedive'))) ||
+      (has('midas') && (has('combomaster') || has('xp'))) ||
+      (has('hyperrail') && (has('pierce') || has('sniper')))
+    );
   }
 
   /** skip the pick for +20 HP — a strategic valve when nothing fits the build */
@@ -511,6 +533,7 @@ export class GameEngine {
     this.dashKickY = this.dashDy * 26;
     this.audio.dash();
     this.fx.shockwave(this.px, this.py, '#00f0ff', 90, 0.3, 3);
+    this.hybridDashFx(this.px, this.py);
   }
 
   /** P2 dash — solo delegates to P1 so ShiftRight keeps working alone. */
@@ -536,6 +559,7 @@ export class GameEngine {
     q.invuln = Math.max(q.invuln, 0.28);
     this.audio.dash();
     this.fx.shockwave(q.x, q.y, '#ffffff', 90, 0.3, 3);
+    this.hybridDashFx(q.x, q.y);
   }
 
   // ---------- setup ----------
@@ -1579,6 +1603,59 @@ export class GameEngine {
     this.audio.shoot();
   }
 
+  /** v7.5 hybrids fired on every dash: nova blast + temporal slow */
+  private hybridDashFx(x: number, y: number): void {
+    const nd = this.taken.get('novadash') ?? 0;
+    if (nd > 0) {
+      const dmg = this.stats.damage * (1.6 + nd * 0.9);
+      this.novaBurstAt(x, y, 170 + nd * 30, dmg, '#ff9f1c');
+      this.audio.nova();
+      if (!this.reducedMotion) this.trauma = Math.min(1, this.trauma + 0.15);
+    }
+    const tp = this.taken.get('temporal') ?? 0;
+    if (tp > 0) {
+      this.frostT = Math.max(this.frostT, 0.7 + tp * 0.45);
+      this.fx.shockwave(x, y, '#7dd3fc', 200, 0.5, 5);
+      this.fx.text(x, y - 34, '⏳ زمان کند شد!', '#7dd3fc', 15);
+    }
+  }
+
+  /** v7.5: radial nova burst shared by Nova Drive + Phoenix rebirth */
+  private novaBurstAt(x: number, y: number, radius: number, dmg: number, color: string): void {
+    this.fx.shockwave(x, y, color, radius * 1.4, 0.5, 6);
+    this.fx.explosion(x, y, color, 24, 420);
+    this.forEachNear(x, y, radius + 64, (e) => {
+      if (e.hp <= 0 || e.spawnT > 0) return;
+      const rr = radius + e.r;
+      if (dist2(x, y, e.x, e.y) < rr * rr) {
+        this.damageEnemy(e, dmg * (isBossKind(e.kind) ? 0.35 : 1), false, e.x - x, e.y - y);
+      }
+    });
+    this.sweepDeadEnemies();
+  }
+
+  /** v7.5 Storm Rounds: bullet impact arcs lightning across nearby enemies */
+  private stormZap(x: number, y: number, dmg: number, count: number): void {
+    const targets = this.nearestEnemies(x, y, 460, count);
+    if (targets.length === 0) return;
+    let px = x;
+    let py = y;
+    for (const tgt of targets) {
+      this.fx.shockwave(tgt.x, tgt.y, '#5df2ff', 60, 0.3, 3);
+      this.fx.explosion(tgt.x, tgt.y, '#5df2ff', 6, 300);
+      this.fx.hitSpark((px + tgt.x) / 2, (py + tgt.y) / 2, Math.atan2(tgt.y - py, tgt.x - px), '#ffffff');
+      this.damageEnemy(tgt, dmg, false, tgt.x - px, tgt.y - py);
+      px = tgt.x;
+      py = tgt.y;
+    }
+    // throttle: high fire-rate builds would otherwise stack nova noise every frame
+    const nowMs = performance.now();
+    if (nowMs - this.lastStormSfx > 160) {
+      this.lastStormSfx = nowMs;
+      this.audio.nova();
+    }
+  }
+
   private updateDirector(dt: number): void {
     if (this.victoryT >= 0) return;
     if (this.intermission > 0) {
@@ -2411,6 +2488,11 @@ export class GameEngine {
   private collide(_dt: number): void {
     this.rebuildGrid();
     // friendly bullets vs enemies (spatial grid: only nearby cells)
+    const stormChance = stormProcChance(this.taken);
+    const stormN = stormChance > 0 ? stormTargets(this.taken) : 0;
+    const stormDmg = stormChance > 0
+      ? this.stats.damage * (0.9 + (this.taken.get('stormrounds') ?? 0) * 0.4) * ((this.taken.get('chain') ?? 0) > 0 ? 1.3 : 1)
+      : 0;
     for (const b of this.bullets) {
       if (b.dead) continue;
       this.forEachNear(b.x, b.y, 64, (e) => {
@@ -2419,6 +2501,10 @@ export class GameEngine {
         if (dist2(b.x, b.y, e.x, e.y) < rr * rr) {
           b.hit.push(e.id);
           this.damageEnemy(e, b.dmg, b.crit, b.vx, b.vy);
+          // v7.5 Storm Rounds: impact arcs lightning (once per bullet)
+          if (stormChance > 0 && !b.homing && Math.random() < stormChance) {
+            this.stormZap(b.x, b.y, stormDmg, stormN);
+          }
           if (b.hit.length > b.pierce) b.dead = true;
         }
       });
@@ -2521,6 +2607,21 @@ export class GameEngine {
     const kb = isBossKind(e.kind) ? 12 : e.kind === 'tank' || e.kind === 'hive' ? 35 : 130;
     e.kx += (vx / l) * kb;
     e.ky += (vy / l) * kb;
+    // v7.5 Crit Detonation: crits explode — AoE around the impact (no chain recursion)
+    const cn = critNovaMult(this.taken);
+    if (crit && cn > 0) {
+      const radius = critNovaRadius(this.taken);
+      const aoe = dmg * cn;
+      this.fx.shockwave(e.x, e.y, '#ffb020', radius * 1.2, 0.4, 5);
+      this.fx.explosion(e.x, e.y, '#ffb020', 16, 380);
+      this.forEachNear(e.x, e.y, radius + 64, (o) => {
+        if (o === e || o.hp <= 0 || o.spawnT > 0) return;
+        const rr2 = radius + o.r;
+        if (dist2(e.x, e.y, o.x, o.y) < rr2 * rr2) {
+          this.damageEnemy(o, aoe * (isBossKind(o.kind) ? 0.35 : 1), false, o.x - e.x, o.y - e.y);
+        }
+      });
+    }
     // potato: hit explosion only on crits — chip hits stay silent for FPS
     if (this.quality <= 2 || crit) {
       this.fx.explosion(e.x, e.y, ENEMY_COLOR[e.kind], crit ? 9 : 4, crit ? 320 : 220);
@@ -2552,7 +2653,7 @@ export class GameEngine {
     const mutMult = this.mutator ? MUTATORS[this.mutator].scoreMult : 1;
     const endlessMult = this.endless ? 1.5 : 1;
     const diffMult = diffScoreMultFor(this.opts.difficulty);
-    const pts = e.score * (1 + this.wave * 0.08) * comboMult * mutMult * endlessMult * diffMult;
+    const pts = e.score * (1 + this.wave * 0.08) * comboMult * mutMult * endlessMult * diffMult * midasScoreMult(this.taken);
     this.score += pts;
     if (this.kills === 1) this.grantAchievement('first_blood');
     if (this.combo === 50) this.grantAchievement('combo50');
@@ -2617,9 +2718,9 @@ export class GameEngine {
       }
       this.boss = null;
     } else {
-      // gems (doubled during gold rush; echo elites drop double again; v7 +20% base)
+      // gems (doubled during gold rush; echo elites drop double again; v7 +20% base; v7.5 midas +25%/stack)
       const echoMult = e.affix === 'echo' ? 2 : 1;
-      const gemVal = Math.ceil(e.xp * 1.2 * (this.mutator === 'gold_rush' ? 2 : 1) * echoMult);
+      const gemVal = Math.ceil(e.xp * 1.2 * (this.mutator === 'gold_rush' ? 2 : 1) * echoMult * midasGemMult(this.taken));
       const parts = e.xp >= 10 ? 3 : 1;
       for (let i = 0; i < parts; i++) {
         this.gems.push({
@@ -2819,6 +2920,12 @@ export class GameEngine {
             e.orbHitCd = 0.35;
             const ka = angleTo(e.x, e.y, ox, oy);
             this.damageEnemy(e, dmg, false, Math.cos(ka) * 300, Math.sin(ka) * 300);
+            // v7.5 Vampiric Orbit: blades sip life back into their pilot
+            const vamp = this.taken.get('vampire') ?? 0;
+            if (vamp > 0 && f.alive && f.hp < this.stats.maxHp) {
+              f.hp = Math.min(this.stats.maxHp, f.hp + 0.5 * vamp);
+              if (Math.random() < 0.25) this.fx.pickupBurst(f.x, f.y, '#ff5d7e');
+            }
           }
         });
       }
@@ -2855,13 +2962,14 @@ export class GameEngine {
         this.trauma = Math.min(1, this.trauma + 0.15);
       }
     }
-    const seekerStacks = this.taken.get('seeker') ?? 0;
+    const twinStacks = this.taken.get('twinlink') ?? 0;
+    const seekerStacks = (this.taken.get('seeker') ?? 0) + twinStacks;
     if (seekerStacks > 0) {
       this.seekerCd -= dt;
       if (this.seekerCd <= 0) {
         this.seekerCd = Math.max(1.2, 2.8 - 0.4 * seekerStacks);
-        // v3.2: 3+ stacks fire a twin volley — seeker fantasy finally pays off
-        const volley = seekerStacks >= 3 ? 2 : 1;
+        // v3.2: 3+ stacks fire a twin volley — v7.5 Twin Link adds +1 missile per stack
+        const volley = (seekerStacks >= 3 ? 2 : 1) + twinStacks;
         for (const f of this.activeFighters()) {
           for (let v = 0; v < volley; v++) {
             const tgt = this.nearestEnemyFrom(f.x, f.y, 1200);
@@ -2951,17 +3059,28 @@ export class GameEngine {
     f.vy += Math.sin(a) * 260;
     if (f.hp <= 0) {
       // v3 Second Wind: cheat death — 2 stacks = shorter cd + bigger heal
+      // v7.5 Phoenix Core: explosive rebirth even without Second Wind
       const sw = this.taken.get('secondwind') ?? 0;
-      if (sw > 0 && this.swCd <= 0) {
-        this.swCd = sw >= 2 ? 60 : 85;
-        f.hp = Math.round(this.stats.maxHp * (sw >= 2 ? 0.45 : 0.32));
+      const ph = this.taken.get('phoenix') ?? 0;
+      if ((sw > 0 || ph > 0) && this.swCd <= 0) {
+        this.swCd = ph > 0 ? 60 : sw >= 2 ? 60 : 85;
+        f.hp = Math.round(this.stats.maxHp * (ph > 0 ? 0.6 : sw >= 2 ? 0.45 : 0.32));
         f.invuln = 2;
         this.trauma = 1;
         this.slowmoT = Math.max(this.slowmoT, 0.8);
         this.fx.shockwave(f.x, f.y, '#ffffff', 320, 0.9, 7);
         this.fx.explosion(f.x, f.y, '#3dff8e', 60, 480);
+        if (ph > 0) {
+          // the phoenix detonates: everything around burns
+          this.novaBurstAt(f.x, f.y, 420, this.stats.damage * 8, '#ff5d2a');
+          this.fx.shockwave(f.x, f.y, '#ffd319', 560, 0.8, 8);
+          this.audio.nuke();
+          this.setAnnounce(`🔥 ققنوس برخاست! (Phoenix)${this.coOp ? ` — بازیکن ${idx + 1}` : ''}`, 2.6, 3);
+          this.grantAchievement('phoenix_rise');
+        } else {
+          this.setAnnounce(`💚 فرصت دوباره! (Second Wind)${this.coOp ? ` — بازیکن ${idx + 1}` : ''}`, 2.4, 3);
+        }
         this.audio.secondWind();
-        this.setAnnounce(`💚 فرصت دوباره! (Second Wind)${this.coOp ? ` — بازیکن ${idx + 1}` : ''}`, 2.4, 3);
         this.grantAchievement('second_wind');
         this.emitHud();
         return;

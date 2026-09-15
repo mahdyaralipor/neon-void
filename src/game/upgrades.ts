@@ -150,6 +150,52 @@ export const UPGRADE_POOL: UpgradeDef[] = [
     descFa: '+۴۰ جان و +۲ آرمور، -۸٪ سرعت', descEn: 'tank up, slow down',
     tier: 'rare', maxStacks: 4, icon: 'fortress',
   },
+  // ---- NEW in v7.5 — HYBRID FUSIONS (synergy upgrades) ----
+  {
+    id: 'stormrounds', nameFa: 'گلوله‌های طوفانی', nameEn: 'Storm Rounds',
+    descFa: 'گلوله‌ها ۲۵٪ شانس صاعقه به ۳ دشمن نزدیک (سینرژی با طوفان زنجیره‌ای)', descEn: 'bullets may chain lightning',
+    tier: 'epic', maxStacks: 3, icon: 'storm',
+  },
+  {
+    id: 'critnova', nameFa: 'انفجار کریتیکال', nameEn: 'Crit Detonation',
+    descFa: 'کریت‌ها منفجر می‌شوند: دمیج ناحیه‌ای ۹۰٪ (سینرژی با ددآی)', descEn: 'crits explode for AoE',
+    tier: 'epic', maxStacks: 3, icon: 'detonate',
+  },
+  {
+    id: 'novadash', nameFa: 'دش نووایی', nameEn: 'Nova Drive',
+    descFa: 'هر دش یک انفجار نووا آزاد می‌کند (سینرژی با نووا/فاز)', descEn: 'dash unleashes a nova blast',
+    tier: 'epic', maxStacks: 2, icon: 'novadrive',
+  },
+  {
+    id: 'vampire', nameFa: 'مدار خون‌آشام', nameEn: 'Vampiric Orbit',
+    descFa: 'تیغه‌های مداری با هر ضربه جان می‌دزدند (سینرژی با لایف‌استیل)', descEn: 'blades steal life on hit',
+    tier: 'rare', maxStacks: 3, icon: 'vampire',
+  },
+  {
+    id: 'twinlink', nameFa: 'پیوند دوقلو', nameEn: 'Twin Link',
+    descFa: '+۱ موشک جوینده در هر والی و +۶٪ سرعت شلیک (سینرژی با سیکر)', descEn: '+1 seeker per volley',
+    tier: 'rare', maxStacks: 3, icon: 'twinlink',
+  },
+  {
+    id: 'phoenix', nameFa: 'هسته ققنوس', nameEn: 'Phoenix Core',
+    descFa: 'احیای انفجاری با ۶۰٪ جان + نووای عظیم (سینرژی با فرصت دوباره)', descEn: 'explosive rebirth + mega nova',
+    tier: 'epic', maxStacks: 1, icon: 'phoenix',
+  },
+  {
+    id: 'temporal', nameFa: 'کویل زمانی', nameEn: 'Temporal Coil',
+    descFa: 'دش زمان دشمنان را ۱ ثانیه کند می‌کند + کول‌داون کمتر', descEn: 'dash slows enemy time',
+    tier: 'rare', maxStacks: 3, icon: 'temporal',
+  },
+  {
+    id: 'midas', nameFa: 'موتور میداس', nameEn: 'Midas Engine',
+    descFa: 'جم‌ها +۲۵٪ ارزش و کیل‌ها +۱۰٪ امتیاز (سینرژی با کمبو)', descEn: 'richer gems, fatter score',
+    tier: 'rare', maxStacks: 4, icon: 'midas',
+  },
+  {
+    id: 'hyperrail', nameFa: 'ریل هایپر', nameEn: 'Hyper Rail',
+    descFa: '+۱ نافذ، +۱۵٪ دمیج و +۱۲٪ سرعت گلوله', descEn: 'pierce + damage + velocity',
+    tier: 'rare', maxStacks: 3, icon: 'hyperrail',
+  },
 ];
 
 export function applyUpgrade(stats: PlayerStats, id: string): void {
@@ -192,12 +238,49 @@ export function applyUpgrade(stats: PlayerStats, id: string): void {
     case 'phasedive': stats.dashCooldownMax = Math.max(0.6, stats.dashCooldownMax * 0.92); stats.moveSpeed *= 1.03; break;
     case 'sniper': stats.damage *= 1.35; stats.bulletSpeed *= 1.3; stats.fireRate *= 0.9; break;
     case 'fortress': stats.maxHp += 40; stats.armor += 2; stats.moveSpeed *= 0.92; break;
+    // ---- v7.5 hybrids ----
+    case 'stormrounds': stats.damage *= 1.06; break;
+    case 'critnova': stats.critChance = Math.min(0.8, stats.critChance + 0.03); break;
+    case 'novadash': stats.dashCooldownMax = Math.max(0.6, stats.dashCooldownMax * 0.94); break;
+    case 'vampire':
+      stats.orbitalDamage *= 1.1;
+      if (stats.orbitals === 0) stats.orbitals = 1;
+      break;
+    case 'twinlink': stats.fireRate = Math.min(14, stats.fireRate * 1.06); break;
+    case 'phoenix': stats.maxHp += 20; break;
+    case 'temporal':
+      stats.dashCooldownMax = Math.max(0.55, stats.dashCooldownMax * 0.95);
+      stats.moveSpeed *= 1.02;
+      break;
+    case 'midas': stats.xpGainMult *= 1.06; break;
+    case 'hyperrail':
+      stats.pierce = Math.min(6, stats.pierce + 1);
+      stats.damage *= 1.15;
+      stats.bulletSpeed *= 1.12;
+      break;
   }
 }
 
 export const UPGRADE_MAP: Record<string, UpgradeDef> = Object.fromEntries(
   UPGRADE_POOL.map((u) => [u.id, u]),
 );
+
+/** hybrids appear more often when their partner upgrade is owned — builds feel smart */
+function synergyBoost(id: string, taken: Map<string, number>): number {
+  const has = (k: string) => (taken.get(k) ?? 0) > 0;
+  switch (id) {
+    case 'stormrounds': return has('chain') || has('velocity') ? 2.2 : 1;
+    case 'critnova': return has('crit') || has('headhunter') ? 2.2 : 1;
+    case 'novadash': return has('nova') || has('dash') || has('phasedive') ? 2.2 : 1;
+    case 'vampire': return has('orbital') || has('lifesteal') ? 2.2 : 1;
+    case 'twinlink': return has('seeker') || has('multishot') ? 2.2 : 1;
+    case 'phoenix': return has('secondwind') || has('nova') ? 2.5 : 1;
+    case 'temporal': return has('dash') || has('phasedive') ? 2 : 1;
+    case 'midas': return has('combomaster') || has('xp') || has('magnet') ? 2 : 1;
+    case 'hyperrail': return has('pierce') || has('velocity') || has('sniper') ? 2 : 1;
+    default: return 1;
+  }
+}
 
 /** dynamic executioner multiplier — read from taken stacks */
 export function executionerMult(taken: Map<string, number>): number {
@@ -219,6 +302,27 @@ export function thornsDamage(taken: Map<string, number>): number {
   return (taken.get('thorns') ?? 0) * 12;
 }
 
+/** v7.5 hybrid helpers — single source of truth for engine + UI */
+export function stormProcChance(taken: Map<string, number>): number {
+  return Math.min(0.75, (taken.get('stormrounds') ?? 0) * 0.25);
+}
+export function stormTargets(taken: Map<string, number>): number {
+  const base = 2 + (taken.get('stormrounds') ?? 0);
+  return base + ((taken.get('chain') ?? 0) > 0 ? 2 : 0);
+}
+export function critNovaMult(taken: Map<string, number>): number {
+  return (taken.get('critnova') ?? 0) * 0.9;
+}
+export function critNovaRadius(taken: Map<string, number>): number {
+  return 110 + (taken.get('critnova') ?? 0) * 25;
+}
+export function midasGemMult(taken: Map<string, number>): number {
+  return 1 + (taken.get('midas') ?? 0) * 0.25;
+}
+export function midasScoreMult(taken: Map<string, number>): number {
+  return 1 + (taken.get('midas') ?? 0) * 0.1;
+}
+
 export function rollUpgrades(taken: Map<string, number>, count = 3): UpgradeDef[] {
   const avail = UPGRADE_POOL.filter((u) => (taken.get(u.id) ?? 0) < u.maxStacks);
   // orbitals need no prerequisite; bladeplus slightly more likely if orbitals owned
@@ -230,6 +334,7 @@ export function rollUpgrades(taken: Map<string, number>, count = 3): UpgradeDef[
     for (const u of bag) {
       let w = weight(u.tier);
       if (u.id === 'bladeplus' && (taken.get('orbital') ?? 0) > 0) w *= 2;
+      w *= synergyBoost(u.id, taken);
       total += w;
     }
     let r = Math.random() * total;
@@ -237,6 +342,7 @@ export function rollUpgrades(taken: Map<string, number>, count = 3): UpgradeDef[
     for (let i = 0; i < bag.length; i++) {
       let w = weight(bag[i].tier);
       if (bag[i].id === 'bladeplus' && (taken.get('orbital') ?? 0) > 0) w *= 2;
+      w *= synergyBoost(bag[i].id, taken);
       r -= w;
       if (r <= 0) { idx = i; break; }
     }

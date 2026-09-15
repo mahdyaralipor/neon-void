@@ -9,6 +9,12 @@ import {
   comboWindow,
   thornsDamage,
   rollUpgrades,
+  stormProcChance,
+  stormTargets,
+  critNovaMult,
+  critNovaRadius,
+  midasGemMult,
+  midasScoreMult,
 } from './upgrades';
 
 describe('upgrade pool integrity', () => {
@@ -91,6 +97,49 @@ describe('dynamic multipliers', () => {
   it('thorns damage is 12 per stack', () => {
     expect(thornsDamage(new Map())).toBe(0);
     expect(thornsDamage(new Map([['thorns', 3]]))).toBe(36);
+  });
+});
+
+describe('v7.5 hybrids', () => {
+  it('pool has 38 upgrades including all 9 fusions', () => {
+    expect(UPGRADE_POOL.length).toBe(38);
+    for (const id of ['stormrounds', 'critnova', 'novadash', 'vampire', 'twinlink', 'phoenix', 'temporal', 'midas', 'hyperrail']) {
+      expect(UPGRADE_MAP[id]).toBeDefined();
+    }
+  });
+
+  it('vampire grants a first orbital blade', () => {
+    const s = { ...BASE_STATS };
+    applyUpgrade(s, 'vampire');
+    expect(s.orbitals).toBe(1);
+  });
+
+  it('hyperrail adds pierce capped at 6', () => {
+    const s = { ...BASE_STATS };
+    for (let i = 0; i < 10; i++) applyUpgrade(s, 'hyperrail');
+    expect(s.pierce).toBeLessThanOrEqual(6);
+    expect(s.damage).toBeGreaterThan(BASE_STATS.damage);
+  });
+
+  it('phoenix is single-stack and adds max HP', () => {
+    expect(UPGRADE_MAP['phoenix'].maxStacks).toBe(1);
+    const s = { ...BASE_STATS };
+    applyUpgrade(s, 'phoenix');
+    expect(s.maxHp).toBe(BASE_STATS.maxHp + 20);
+  });
+
+  it('storm helpers scale with stacks and chain synergy', () => {
+    expect(stormProcChance(new Map())).toBe(0);
+    expect(stormProcChance(new Map([['stormrounds', 2]]))).toBeCloseTo(0.5, 6);
+    expect(stormTargets(new Map([['stormrounds', 1]]))).toBe(3);
+    expect(stormTargets(new Map([['stormrounds', 1], ['chain', 1]]))).toBe(5);
+  });
+
+  it('crit nova and midas helpers scale', () => {
+    expect(critNovaMult(new Map([['critnova', 2]]))).toBeCloseTo(1.8, 6);
+    expect(critNovaRadius(new Map([['critnova', 1]]))).toBe(135);
+    expect(midasGemMult(new Map([['midas', 2]]))).toBeCloseTo(1.5, 6);
+    expect(midasScoreMult(new Map([['midas', 1]]))).toBeCloseTo(1.1, 6);
   });
 });
 

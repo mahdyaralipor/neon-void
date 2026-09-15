@@ -30,6 +30,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'greed_is_good', nameFa: 'طمع خوب است', nameEn: 'GREED IS GOOD', descFa: 'اولین طمع طلایی', icon: 'gem' },
   { id: 'untouchable', nameFa: 'دست‌نیافتنی', nameEn: 'UNTOUCHABLE', descFa: 'اولین فاز شبح', icon: 'ghost' },
   { id: 'blood_brothers', nameFa: 'برادران خون', nameEn: 'BLOOD BROTHERS', descFa: 'موج ۱۰ دونفره', icon: 'medal' },
+  { id: 'stormlord', nameFa: 'ارباب طوفان', nameEn: 'STORM LORD', descFa: 'گرفتن گلوله‌های طوفانی', icon: 'combo' },
+  { id: 'phoenix_rise', nameFa: 'برخاستن ققنوس', nameEn: 'PHOENIX RISE', descFa: 'احیا با هسته ققنوس', icon: 'heartpulse' },
+  { id: 'fusion', nameFa: 'ذوب خلأ', nameEn: 'VOID FUSION', descFa: 'تکمیل یک ترکیب سینرژیک', icon: 'gem' },
 ];
 
 const KEY = 'neon-void-achievements-v1';
